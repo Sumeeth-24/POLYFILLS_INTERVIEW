@@ -1493,11 +1493,15 @@ class CustomPromise {
   };
 
   _handleUpdate = (state, value) => {
+    // This line ensures that a promise can only be settled once — either fulfilled or rejected. If a promise is already resolved/rejected (i.e., not pending), we skip further updates.
     if (this.state !== states.PENDING) {
       return;
     }
 
     setTimeout(() => {
+      // This checks if the resolved value is another promise (i.e., a thenable), and if so, we must wait for that promise to resolve/reject first.
+      // const inner = new CustomPromise((res) => setTimeout(() => res("done"), 1000));
+      // const outer = new CustomPromise((res) => res(inner));
       if (value instanceof CustomPromise) {
         value.then(this._resolve, this._reject);
       }
@@ -1529,7 +1533,7 @@ class CustomPromise {
       this._addHandler({
         onSuccess: (value) => {
           if (!onSuccess) {
-            return reject(value);
+            return resolve(value);
           }
           try {
             return resolve(onSuccess(value));
