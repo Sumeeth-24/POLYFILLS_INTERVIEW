@@ -444,8 +444,11 @@ console.log(count); // 1 (only incremented once)
 // Avoids initializing something twice (e.g., event listeners, animations)
 
 // CALL VS APPLY VS BIND
-/* They are Function prototype methods used to manually set the this value and pass arguments. */
+
+/* They are Function prototype methods used to invoke functions with a specific this context and arguments.
+ * They allow borrowing methods from one object and using them in the context of another. This is useful when passing functions as arguments (callbacks) and the original this context is lost. .call and .apply allow the function to be invoked with the intended this value.
 /**
+ 
  * A Symbol is a primitive data type introduced in ES6. It is a unique and immutable value that can be used as an object key without the risk of property name collisions.
  * const sym1 = Symbol("id");
  * const sym2 = Symbol("id");
@@ -649,8 +652,8 @@ fn("Debounced!"); // Timer restarts again (this one will execute after 300ms)
 setTimeout(() => {
   fn("Debounced twice"); // Logs this after another 300ms (at ~700ms total)
 }, 400);
-const context = this;
 
+//const context = this;
 // If you don’t preserve this, then fn inside the setTimeout will lose its connection to myObject. That’s because setTimeout calls functions with this set to window (in browser) or undefined (in strict mode).
 
 // Why it said "Start a new timer -- only if no more calls come in before delay"
@@ -735,7 +738,88 @@ window.addEventListener("resize", myThrottle(onResize, 1000));
 // -------------------------------------------
 // 15. USEMEMO() & USECALLBACK() Polyfill
 // -------------------------------------------
-// LEARNERS BUCKET REACT HOOKS
+
+import { useRef, useEffect } from "react";
+
+// helper function to deep check dependency
+const detectChangesMemo = (prevDeps, deps) => {
+  if (prevDeps === null) return false;
+  if (prevDeps?.length !== deps.length) return false;
+
+  for (let i = 0; i < deps.length; i++) {
+    if (prevDeps[i] !== deps[i]) return false;
+  }
+
+  return true;
+};
+
+export const useMemoPolyfill = (callback, deps) => {
+  // store the cached value
+  // using ref instead of state will prevent from unnecessary re-renders
+  const memoizedRef = useRef(null);
+
+  // check if the dependency is changed or not
+  if (
+    !memoizedRef.current ||
+    !detectChanges(memoizedRef?.current?.deps, deps)
+  ) {
+    memoizedRef.current = {
+      value: callback(), // store the computed value returned from the callback
+      deps: deps,
+    };
+  }
+
+  //reset the value
+  useEffect(() => {
+    return () => {
+      memoizedRef.current = null;
+    };
+  }, []);
+
+  //return the cached value
+  return memoizedRef.current.value;
+};
+
+import { useRef, useEffect } from "react";
+
+// helper function to deep check dependency
+const detectChanges = (prevDeps, deps) => {
+  if (prevDeps === null) return false;
+  if (prevDeps?.length !== deps.length) return false;
+
+  for (let i = 0; i < deps.length; i++) {
+    if (prevDeps[i] !== deps[i]) return false;
+  }
+
+  return true;
+};
+
+export const useCallbackPolyfill = (callback, deps) => {
+  // store the cached value
+  // using ref instead of state will prevent from unnecessary re-renders
+  const memoizedRef = useRef(null);
+
+  // check if the dependency is changed or not
+  if (
+    !memoizedRef.current ||
+    !detectChanges(memoizedRef?.current?.deps, deps)
+  ) {
+    memoizedRef.current = {
+      value: callback, // store the callback function
+      deps: deps,
+    };
+  }
+
+  //reset the value
+  useEffect(() => {
+    return () => {
+      memoizedRef.current = null;
+    };
+  }, []);
+
+  //return the cached value
+  return memoizedRef.current.value;
+};
 
 // -------------------------------------------
 // 16. Array.isArray Polyfill
@@ -929,8 +1013,8 @@ console.log(["a", "b"].includes("c")); // false
 // 22. Array.prototype.sort Polyfill
 // -------------------------------------------
 
-if (!Array.prototype.sort) {
-  Array.prototype.sort = function (compareFn) {
+if (!Array.prototype.mySort) {
+  Array.prototype.mySort = function (compareFn) {
     compareFn =
       compareFn ||
       function (a, b) {
@@ -973,6 +1057,9 @@ if (!Array.prototype.sort) {
     return this;
   };
 }
+
+const arrSort = [7, 4, 1, 8, 9, 34];
+console.log(arrSort.mySort()); // [ 1, 34, 4, 7, 8, 9 ]
 
 // -------------------------------------------
 // 23. String.prototype.repeat Polyfill
@@ -1470,7 +1557,7 @@ class CustomPromise {
   constructor(callback) {
     this.state = states.PENDING;
     this.value = undefined;
-    this.handlers = []; // fulfilled array
+    this.handlers = []; // fulfillment array
 
     try {
       callback(this._resolve, this._reject);
@@ -1585,7 +1672,7 @@ function promiseRace(promises) {
   return new Promise((resolve, reject) => {
     promises.forEach((promise) => {
       Promise.resolve(promise) // added check for non-promise value
-        .then(resolve, reject);
+        .then(resolve, reject); // The first to settle (resolve OR reject) will "win" the race
     });
   });
 }
@@ -1626,18 +1713,25 @@ testPromiseRace();
 
 function promiseAny(promises) {
   let rejectedCount = 0;
-  let reasons = [];
+  const reasons = [];
+  const promiseArray = Array.from(promises); // in case it's an iterable
 
   return new Promise((resolve, reject) => {
-    promises.forEach((promise, index) => {
+    if (promiseArray.length === 0) {
+      // Immediately reject with AggregateError
+      reject(new AggregateError([], "All promises were rejected"));
+      return;
+    }
+
+    promiseArray.forEach((promise, index) => {
       Promise.resolve(promise)
-        .then((value) => resolve(value))
+        .then(resolve)
         .catch((reason) => {
-          reasons.push(reason);
+          reasons[index] = reason;
           rejectedCount++;
 
-          if (rejectedCount === promises.length) {
-            reject(new Error("All promises were rejected"));
+          if (rejectedCount === promiseArray.length) {
+            reject(new AggregateError(reasons, "All promises were rejected"));
           }
         });
     });
@@ -1649,28 +1743,25 @@ const promises1 = [
   Promise.resolve("Success"),
   Promise.reject("Error 2"),
 ];
-
 promiseAny(promises1)
   .then((result) => console.log("Resolved with:", result)) // Should print: Resolved with: Success
   .catch((error) => console.log("Rejected with:", error.message));
 
 const promises2 = [Promise.reject("Error 1"), Promise.reject("Error 2")];
-
 promiseAny(promises2)
   .then((result) => console.log("Resolved with:", result))
   .catch((error) => console.log("Rejected with:", error.message)); // Should print: Rejected with: All promises were rejected
 
 const promises3 = [42, Promise.reject("Error")];
-
 promiseAny(promises3)
   .then((result) => console.log("Resolved with:", result)) // Should print: Resolved with: 42
   .catch((error) => console.log("Rejected with:", error.message));
 
 const promises4 = [];
-
 promiseAny(promises4)
-  .then((result) => console.log("Resolved with 4:", result))
-  .catch((error) => console.log("Rejected with 4:", error.message)); // Should print: Rejected with: All promises were rejected
+  .then((result) => console.log("Resolved with:", result))
+  .catch((error) => console.log("Rejected with:", error.message)); // Should print: Rejected with: All promises were rejected
+
 // ---------------------------------------------
 
 // ---------------------------------------------
@@ -1690,21 +1781,26 @@ promiseAny(promises4)
  */
 
 function promiseAll(promises) {
-  let results = [];
-  let completedPromises = 0;
+  const promiseArray = Array.from(promises); // in case it's iterable, not an array
+
+  if (promiseArray.length === 0) {
+    return Promise.resolve([]);
+  }
+
+  const results = [];
+  let completed = 0;
 
   return new Promise((resolve, reject) => {
-    promises.forEach((promise, index) => {
+    promiseArray.forEach((promise, index) => {
       Promise.resolve(promise)
         .then((value) => {
           results[index] = value;
-          completedPromises++;
-
-          if (completedPromises === promises.length) {
+          completed++;
+          if (completed === promiseArray.length) {
             resolve(results);
           }
         })
-        .catch(reject);
+        .catch(reject); // Reject immediately on first error
     });
   });
 }
@@ -1716,7 +1812,7 @@ const promisesAll1 = [
 ];
 
 promiseAll(promisesAll1)
-  .then((result) => console.log("Resolved with:", result)) // Should print: Resolved with: [1, 2, 3]
+  .then((result) => console.log("Resolved with:", result))
   .catch((error) => console.log("Rejected with:", error.message));
 
 const promisesAll2 = [
@@ -1730,13 +1826,11 @@ promiseAll(promisesAll2)
   .catch((error) => console.log("Rejected with:", error.message)); // Should print: Rejected with: All promises were rejected
 
 const promisesAll3 = [42, "hello", Promise.resolve("world")];
-
 promiseAll(promisesAll3)
   .then((result) => console.log("Resolved with:", result)) // Should print: Resolved with: [42, "hello", "world"]
   .catch((error) => console.log("Rejected with:", error.message));
 
 const promisesAll4 = [];
-
 promiseAll(promisesAll4)
   .then((result) => console.log("Resolved with:", result)) // Should print: Resolved with: []
   .catch((error) => console.log("Rejected with 4:", error.message));
@@ -1747,28 +1841,30 @@ promiseAll(promisesAll4)
 // ---------------------------------------------
 
 function promiseAllSettled(promises) {
-  let results = [];
-  let completedPromises = 0;
+  const results = [];
+  let completed = 0;
+  const promiseArray = Array.from(promises);
 
-  if (promises.length === 0) {
-    resolve([]);
-    return;
+  if (promiseArray.length === 0) {
+    return Promise.resolve([]);
   }
 
-  promises.forEach((promise, index) => {
-    Promise.resolve(promise)
-      .then((value) => {
-        results[index] = { status: "fulfilled", value };
-      })
-      .catch((reason) => {
-        results[index] = { status: "rejected", reason };
-      })
-      .finally(() => {
-        completedPromises++;
-        if (completedPromises === promises.length) {
-          resolve(results);
-        }
-      });
+  return new Promise((resolve) => {
+    promiseArray.forEach((promise, index) => {
+      Promise.resolve(promise)
+        .then((value) => {
+          results[index] = { status: "fulfilled", value };
+        })
+        .catch((reason) => {
+          results[index] = { status: "rejected", reason };
+        })
+        .finally(() => {
+          completed++;
+          if (completed === promiseArray.length) {
+            resolve(results);
+          }
+        });
+    });
   });
 }
 
@@ -1804,3 +1900,78 @@ promiseAllSettled(promisesAllSettled4).then((result) =>
   console.log("Resolved with:", result)
 );
 // Output: []
+
+// ---------------------------------------------
+// 36. Polyfill: GroupBy
+// ---------------------------------------------
+
+function groupBy(collection, property) {
+  const output = {};
+
+  if (!collection || typeof collection !== "object") {
+    return output;
+  }
+
+  const isPropertyFunction = typeof property === "function";
+  const isPropertyPath = typeof property === "string";
+
+  for (const value of Object.values(collection)) {
+    let current = undefined;
+
+    if (isPropertyFunction) {
+      current = property(value);
+    } else if (isPropertyPath) {
+      // {a.b.c} -> [a, b, c]
+      const path = property.split(".");
+      let i;
+      let currentItem = value; // {a: b: {c: { 1 }}}
+      let currentKey;
+
+      for (i = 0; i < path.length; i++) {
+        // [a, b, c] -> currentKey -> path[0] -> a
+        // [a, b, c] -> currentKey -> path[1] -> b
+        // [a, b, c] -> currentKey -> path[2] -> c
+        currentKey = path[i];
+
+        if (!currentItem?.hasOwnProperty(currentKey)) {
+          currentItem = undefined;
+          break;
+        }
+        // {a: b: {c: { 1 }}} -> a??
+        // currentItem -> b: {c: { 1 }}
+
+        // b: {c: { 1 }} -> b??
+        // currentItem -> {c: { 1 }}
+
+        // {c: { 1 }} -> c??
+        // currentItem -> 1
+        currentItem = currentItem[currentKey];
+      }
+      current = currentItem;
+    }
+
+    output[current] = output[current] || [];
+    output[current].push(value);
+  }
+
+  return output;
+}
+
+// // Test with invalid input
+const result1 = groupBy(1);
+console.log(result1); // Output: {}
+
+// // Group by a custom function
+const result2 = groupBy([6.1, 2.4, 2.7, 6.8], Math.floor);
+console.log(result2); // Output: {"2": [2.4, 2.7], "6": [6.1, 6.8]}
+
+// // Group by string property (length of the string)
+const result3 = groupBy(["one", "two", "three"], "length");
+console.log(result3); // Output: {"3": ["one", "two"], "5": ["three"]}
+
+// // Group by deep property path
+const result4 = groupBy(
+  [{ a: { b: { c: 1 } } }, { a: { b: { c: 2 } } }],
+  "a.b.c"
+);
+console.log(result4); // Output: {"1": [{ a: { b: { c: 1}}}], "2": [{ a: { b: { c: 2}}}]}
