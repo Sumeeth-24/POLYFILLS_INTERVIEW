@@ -739,87 +739,87 @@ window.addEventListener("resize", myThrottle(onResize, 1000));
 // 15. USEMEMO() & USECALLBACK() Polyfill
 // -------------------------------------------
 
-import { useRef, useEffect } from "react";
+//  import { useRef, useEffect } from "react";
 
-// helper function to deep check dependency
-const detectChangesMemo = (prevDeps, deps) => {
-  if (prevDeps === null) return false;
-  if (prevDeps?.length !== deps.length) return false;
+// // helper function to deep check dependency
+// const detectChangesMemo = (prevDeps, deps) => {
+//   if (prevDeps === null) return false;
+//   if (prevDeps?.length !== deps.length) return false;
 
-  for (let i = 0; i < deps.length; i++) {
-    if (prevDeps[i] !== deps[i]) return false;
-  }
+//   for (let i = 0; i < deps.length; i++) {
+//     if (prevDeps[i] !== deps[i]) return false;
+//   }
 
-  return true;
-};
+//   return true;
+// };
 
-export const useMemoPolyfill = (callback, deps) => {
-  // store the cached value
-  // using ref instead of state will prevent from unnecessary re-renders
-  const memoizedRef = useRef(null);
+// export const useMemoPolyfill = (callback, deps) => {
+//   // store the cached value
+//   // using ref instead of state will prevent from unnecessary re-renders
+//   const memoizedRef = useRef(null);
 
-  // check if the dependency is changed or not
-  if (
-    !memoizedRef.current ||
-    !detectChanges(memoizedRef?.current?.deps, deps)
-  ) {
-    memoizedRef.current = {
-      value: callback(), // store the computed value returned from the callback
-      deps: deps,
-    };
-  }
+//   // check if the dependency is changed or not
+//   if (
+//     !memoizedRef.current ||
+//     !detectChanges(memoizedRef?.current?.deps, deps)
+//   ) {
+//     memoizedRef.current = {
+//       value: callback(), // store the computed value returned from the callback
+//       deps: deps,
+//     };
+//   }
 
-  //reset the value
-  useEffect(() => {
-    return () => {
-      memoizedRef.current = null;
-    };
-  }, []);
+//   //reset the value
+//   useEffect(() => {
+//     return () => {
+//       memoizedRef.current = null;
+//     };
+//   }, []);
 
-  //return the cached value
-  return memoizedRef.current.value;
-};
+//   //return the cached value
+//   return memoizedRef.current.value;
+// };
 
-import { useRef, useEffect } from "react";
+// import { useRef, useEffect } from "react";
 
-// helper function to deep check dependency
-const detectChanges = (prevDeps, deps) => {
-  if (prevDeps === null) return false;
-  if (prevDeps?.length !== deps.length) return false;
+// // helper function to deep check dependency
+// const detectChanges = (prevDeps, deps) => {
+//   if (prevDeps === null) return false;
+//   if (prevDeps?.length !== deps.length) return false;
 
-  for (let i = 0; i < deps.length; i++) {
-    if (prevDeps[i] !== deps[i]) return false;
-  }
+//   for (let i = 0; i < deps.length; i++) {
+//     if (prevDeps[i] !== deps[i]) return false;
+//   }
 
-  return true;
-};
+//   return true;
+// };
 
-export const useCallbackPolyfill = (callback, deps) => {
-  // store the cached value
-  // using ref instead of state will prevent from unnecessary re-renders
-  const memoizedRef = useRef(null);
+// export const useCallbackPolyfill = (callback, deps) => {
+//   // store the cached value
+//   // using ref instead of state will prevent from unnecessary re-renders
+//   const memoizedRef = useRef(null);
 
-  // check if the dependency is changed or not
-  if (
-    !memoizedRef.current ||
-    !detectChanges(memoizedRef?.current?.deps, deps)
-  ) {
-    memoizedRef.current = {
-      value: callback, // store the callback function
-      deps: deps,
-    };
-  }
+//   // check if the dependency is changed or not
+//   if (
+//     !memoizedRef.current ||
+//     !detectChanges(memoizedRef?.current?.deps, deps)
+//   ) {
+//     memoizedRef.current = {
+//       value: callback, // store the callback function
+//       deps: deps,
+//     };
+//   }
 
-  //reset the value
-  useEffect(() => {
-    return () => {
-      memoizedRef.current = null;
-    };
-  }, []);
+//   //reset the value
+//   useEffect(() => {
+//     return () => {
+//       memoizedRef.current = null;
+//     };
+//   }, []);
 
-  //return the cached value
-  return memoizedRef.current.value;
-};
+//   //return the cached value
+//   return memoizedRef.current.value;
+// };
 
 // -------------------------------------------
 // 16. Array.isArray Polyfill
@@ -1975,3 +1975,55 @@ const result4 = groupBy(
   "a.b.c"
 );
 console.log(result4); // Output: {"1": [{ a: { b: { c: 1}}}], "2": [{ a: { b: { c: 2}}}]}
+
+// ---------------------------------------------
+// 36. Polyfill: FlatMap
+/**
+ * flatMap() is a combination of map() followed by flat(1).
+ * reduce() is used to iterate and accumulate the transformed and flattened array.
+ * concat() is used to flatten one level of nested arrays.
+ */
+// ---------------------------------------------
+
+Array.prototype.flatMapPolyfill = function (callback) {
+  return this.reduce((acc, curr, i) => {
+    // 🧠 Apply the callback to the current item
+    const result = callback(curr, i, this);
+
+    // 📦 Flatten the result by concatenating it to the accumulator
+    return acc.concat(result);
+  }, []);
+};
+
+// ---------------------------------------------
+//  37. Utility: getElementByStyles()
+//  Finds all DOM elements that match a specific computed style
+// ---------------------------------------------
+
+function getElementByStyles(property, value) {
+  const allElements = document.querySelectorAll("*"); // 🌐 Select ALL elements in the document
+
+  return Array.from(allElements).filter((el) => {
+    /**
+     * 🧠 window.getComputedStyle(el)
+     * - Returns the **final, rendered styles** as calculated by the browser.
+     * - Includes:
+     *   ✅ External stylesheets (e.g., CSS files)
+     *   ✅ Internal styles (<style> tags)
+     *   ✅ Inline styles (<div style="...">)
+     *   ✅ Inherited styles
+     *   ✅ Default user-agent styles (browser default CSS)
+     *
+     * ❌ It does NOT only return `el.style` (inline styles only)
+     *
+     * 📌 Use this when you want to inspect how the browser *actually* styles an element.
+     */
+    const style = window.getComputedStyle(el);
+
+    // 🎯 Return elements where the target style matches the expected value (e.g., display === 'flex')
+    return style[property] === value;
+  });
+}
+
+const flexElements = getElementByStyles("display", "flex");
+console.log(flexElements); // Outputs all elements with display: flex
