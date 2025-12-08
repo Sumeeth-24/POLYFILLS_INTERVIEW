@@ -23,6 +23,16 @@ const nums = [10, 2, 3, 4, 5];
  * - this refer to the array on which myMap was called. For example, if you did nums.myMap(...), this would be nums.
  */
 Array.prototype.myMap = function (cb) {
+  // 1. Throw TypeError if 'this' is null or undefined
+  if (this == null) {
+    throw new TypeError("Array.prototype.myMap called on null or undefined");
+  }
+
+  // 2. Throw TypeError if callback is not a function
+  if (typeof cb !== "function") {
+    throw new TypeError(cb + "is not a function");
+  }
+
   // 1. Create a temporary array to store the results
   let temp = [];
 
@@ -60,11 +70,21 @@ console.log("Map:", mapResult, myMapResult);
  * Array.prototype.myFilter
  * - Creates a new array with all elements that pass the test implemented by the provided function.
  * * - This line adds a new function called myMap to the prototype of the Array object.
- * - By doing this, all arrays will have access to this myMap method.
+ * - By doing this, all arrays will have access to this myFilter method.
  * - cb is a parameter representing a callback function that you pass when calling myMap on an array.
- * - this refer to the array on which myMap was called. For example, if you did nums.myMap(...), this would be nums.
+ * - this refer to the array on which myMap was called. For example, if you did nums.myFilter(...), this would be nums.
  */
 Array.prototype.myFilter = function (cb) {
+  // 1. Throw TypeError if 'this' is null or undefined
+  if (this == null) {
+    throw new TypeError("Array.prototype.myFilter called on null or undefined");
+  }
+
+  // 2. Throw TypeError if callback is not a function
+  if (typeof cb !== "function") {
+    throw new TypeError(cb + "is not a function");
+  }
+
   // 1. Create a temporary array to store the filtered results
   let temp = [];
 
@@ -105,6 +125,16 @@ console.log("Filter:", filterResult, myFilterResult);
  * - Executes a reducer function on each element of the array, resulting in a single output value.
  */
 Array.prototype.myReduce = function (cb, initialValue) {
+  // 1. Throw TypeError if 'this' is null or undefined
+  if (this == null) {
+    throw new TypeError("Array.prototype.myReduce called on null or undefined");
+  }
+
+  // 2. Throw TypeError if callback is not a function
+  if (typeof cb !== "function") {
+    throw new TypeError(cb + "is not a function");
+  }
+
   // 1. Determine whether an initial value is provided
   let accumulator = initialValue !== undefined ? initialValue : this[0];
 
@@ -254,7 +284,7 @@ try {
 
 // const str = "hello";
 
-// [].myEvery.call(str, char => char !== 'z'); // 🚫 this would crash without Object(this)
+// [...str].myEvery.call(str, char => char !== 'z'); // 🚫 this would crash without Object(this)
 // But with Object(this), it safely turns "hello" into an object like:
 // {
 //   0: 'h',
@@ -674,21 +704,22 @@ setTimeout(() => {
  */
 
 function myThrottle(fn, interval) {
-  // Store the last time the function was actually executed
-  let lastCallTime = 0;
+  // Store the last time the function was actually executed.
+  // Initialize to a time far enough in the past so the first call runs immediately.
+  let lastCallTime = Date.now() - interval;
 
-  // Store a timeout ID if a future execution is scheduled
+  // Store a timeout ID if a future execution is scheduled.
   let timeoutId = null;
 
-  // Return a throttled version of the original function
+  // Return a throttled version of the original function.
   return function (...args) {
-    // Save the context (`this`) to preserve it inside setTimeout
+    // Save the context (`this`) to preserve it inside setTimeout.
     const context = this;
 
-    // Get the current time in milliseconds
+    // Get the current time in milliseconds.
     const now = Date.now();
 
-    // Calculate how much time is left before we can call the function again
+    // Calculate how much time is left before we can call the function again.
     const remainingTime = interval - (now - lastCallTime);
 
     /**
@@ -696,16 +727,16 @@ function myThrottle(fn, interval) {
      * we execute `fn` immediately.
      */
     if (remainingTime <= 0) {
-      // If a timeout was previously scheduled, clear it (not needed anymore)
+      // If a timeout was previously scheduled, clear it (not needed anymore).
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
       }
 
-      // Update the last call time to now
+      // Update the last call time to now.
       lastCallTime = now;
 
-      // Call the original function with correct context and arguments
+      // Call the original function with correct context and arguments.
       fn.apply(context, args);
     } else if (!timeoutId) {
       /**
@@ -713,13 +744,13 @@ function myThrottle(fn, interval) {
        * and no timeout is already scheduled, schedule one.
        */
       timeoutId = setTimeout(() => {
-        // When the scheduled time passes, update the last call time
+        // When the scheduled time passes, update the last call time.
         lastCallTime = Date.now();
 
-        // Clear the timeout ID to allow future scheduling
+        // Clear the timeout ID to allow future scheduling.
         timeoutId = null;
 
-        // Call the function with the saved context and arguments
+        // Call the function with the saved context and arguments.
         fn.apply(context, args);
       }, remainingTime);
     }
@@ -731,6 +762,7 @@ function myThrottle(fn, interval) {
   };
 }
 
+// Example usage:
 const onResize = () => console.log("Resize event handler called");
 
 window.addEventListener("resize", myThrottle(onResize, 1000));
@@ -1645,6 +1677,32 @@ class CustomPromise {
   catch = (onFailure) => {
     return this.then(null, onFailure);
   };
+
+  finally = (callback) => {
+    // create a new constructor
+    // listen the then and catch method
+    // finally perform the action
+    return new CustomPromise((resolve, reject) => {
+      let wasResolved;
+      let value;
+
+      this.then((val) => {
+        value = val;
+        wasResolved = true;
+        return callback();
+      }).catch((err) => {
+        value = err;
+        wasResolved = false;
+        return callback();
+      });
+
+      if (wasResolved) {
+        resolve(value);
+      } else {
+        reject(value);
+      }
+    });
+  };
 }
 
 const promise = new CustomPromise((resolve, reject) => {
@@ -2027,3 +2085,262 @@ function getElementByStyles(property, value) {
 
 const flexElements = getElementByStyles("display", "flex");
 console.log(flexElements); // Outputs all elements with display: flex
+
+// ---------------------------------------------
+//  38. UseEffect
+// ---------------------------------------------
+import { useEffect, useRef } from "react";
+
+function useCustomEffect(effect, deps) {
+  // -----------------------------
+  // WHY useRef instead of useState?
+  // -----------------------------
+  // - useRef does NOT trigger a re-render when its `.current` changes.
+  // - useEffect needs to store cleanup and previous deps WITHOUT causing renders.
+  // - useState would cause infinite loops because updating state re-renders,
+  //   which triggers useEffect again → infinite re-render cycle.
+  //
+  // So useRef = safe storage, no re-render → exactly what we want.
+  // -----------------------------
+
+  // Store previous dependency array
+  const prevDepsRef = useRef();
+
+  // Store cleanup function returned from effect()
+  const cleanupRef = useRef();
+
+  useEffect(() => {
+    // -----------------------------
+    // Step 1: Check if deps changed
+    // -----------------------------
+    // If no deps were passed, always run effect (same as React)
+    const noDepsProvided = !deps;
+
+    // If previous deps do NOT exist, this is the first render
+    const firstRun = !prevDepsRef.current;
+
+    // Determine if dependency array changed (React uses shallow comparison)
+    const depsChanged =
+      noDepsProvided ||
+      firstRun ||
+      deps.some((dep, i) => dep !== prevDepsRef.current[i]);
+
+    // -----------------------------
+    // Step 2: If dependencies changed,
+    //         run cleanup (if exists) then run new effect
+    // -----------------------------
+    if (depsChanged) {
+      // Cleanup old effect before running new one (React behavior)
+      if (typeof cleanupRef.current === "function") {
+        cleanupRef.current();
+      }
+
+      // Run the actual effect
+      const cleanup = effect();
+
+      // If effect returns a cleanup function, save it
+      if (typeof cleanup === "function") {
+        cleanupRef.current = cleanup;
+      }
+
+      // Save deps for next render
+      prevDepsRef.current = deps;
+    }
+
+    // -----------------------------
+    // Step 3: Return a cleanup for when component unmounts
+    // -----------------------------
+    return () => {
+      if (typeof cleanupRef.current === "function") {
+        cleanupRef.current();
+      }
+    };
+
+    // React will call this entire useEffect when any dependency changes
+  }, deps);
+}
+
+export default useCustomEffect;
+
+// ❓ Why is useEffect used inside the custom polyfill?
+
+// Because React only runs code after render inside a real useEffect.
+// Custom hooks cannot run effects after render — only React can.
+
+// So if you try to implement a polyfill without using real useEffect, your custom version will run during render, which is wrong and breaks React.
+
+// Think of React as the event loop scheduler.
+
+// You can decide what to run.
+// But only React decides when to run it.
+
+// If you bypass React’s scheduling, the entire lifecycle breaks.
+
+// ---------------------------------------------
+//  39. UseState
+// ---------------------------------------------
+let globalState = []; // Stores all state values for the component
+let stateCursor = 0; // Tracks which state index is currently being used
+
+export function useCustomState(initialValue) {
+  // ------------------------------
+  // WHY global array + cursor?
+  // ------------------------------
+  // React stores hook state *in the order they are called*.
+  // Example:
+  //   useState()  -> state[0]
+  //   useState()  -> state[1]
+  //   useEffect() -> hook[2]
+  //
+  // The same order must repeat every render.
+  //
+  // That's why React uses a "hook cursor" internally.
+  // ------------------------------
+
+  const currentCursor = stateCursor; // bind this hook’s index
+  // If there's no value already, it's the first render → initialize state
+  if (globalState[currentCursor] === undefined) {
+    globalState[currentCursor] = initialValue;
+  }
+
+  // The actual value for this useState call
+  const value = globalState[currentCursor];
+
+  // ------------------------------
+  // Why setter uses a function?
+  // ------------------------------
+  // Because React must update the value AND trigger a re-render.
+  // We simulate this by updating globalState[] and forcing a re-render manually.
+  // ------------------------------
+  const setValue = (newValue) => {
+    // Functional update support
+    if (typeof newValue === "function") {
+      globalState[currentCursor] = newValue(globalState[currentCursor]);
+    } else {
+      globalState[currentCursor] = newValue;
+    }
+
+    // In React, state updates schedule a re-render.
+    // Here we simulate "re-render" by calling the component manually.
+    rerender();
+  };
+
+  // Move cursor for the next hook
+  stateCursor++;
+
+  return [value, setValue];
+}
+
+// FOR DEMO
+
+function rerender() {
+  stateCursor = 0; // reset cursor for next render
+  App(); // call component again → re-render
+}
+
+function App() {
+  const [count, setCount] = useCustomState(0);
+  const [name, setName] = useCustomState("John");
+  const [toggle, setToggle] = useCustomState(false);
+
+  console.log("RENDER →", { count, name, toggle });
+
+  // Simulate a button click
+  setTimeout(() => setCount((c) => c + 1), 1000);
+  setTimeout(() => setName("Alice"), 1500);
+  setTimeout(() => setToggle((t) => !t), 2000);
+}
+
+App(); // first render
+
+// RENDER → { count: 0, name: "John", toggle: false }
+// RENDER → { count: 1, name: "John", toggle: false }
+// RENDER → { count: 1, name: "Alice", toggle: false }
+// RENDER → { count: 1, name: "Alice", toggle: true }
+
+// 1. Why global array?
+// Because React stores hook state outside the function, not inside.
+
+// 2. Why cursor?
+// Because hooks rely on call order, not variable names.
+
+// 3. Why state persists?
+// Because stored in globalState, which does not reset between renders.
+
+// 4. Why setter triggers re-render?
+// Because new UI depends on new state → React must re-run component.
+
+// 5. Why support setState(prev => ...)?
+// Because React supports functional updates to avoid stale closures.
+
+// ---------------------------------------------
+//  40. UseReducer
+// ---------------------------------------------
+let globalState = []; // Stores all hook states
+let stateCursor = 0; // Tracks which hook index is currently being read
+
+export function useCustomReducer(reducer, initialState) {
+  const cursor = stateCursor;
+
+  // ----------------------------------------
+  // Initialize state on first render
+  // ----------------------------------------
+  if (globalState[cursor] === undefined) {
+    globalState[cursor] = initialState;
+  }
+
+  const dispatch = (action) => {
+    // reducer(currentState, action) → nextState
+    globalState[cursor] = reducer(globalState[cursor], action);
+
+    // Simulate React re-render
+    rerender();
+  };
+
+  // Move cursor to next hook
+  stateCursor++;
+
+  return [globalState[cursor], dispatch];
+}
+
+// useReducer is basically useState + reducer
+// state + dispatch
+// where dispatch = setState(reducer(current, action))
+
+function rerender() {
+  stateCursor = 0; // reset hook index before re-render
+  App(); // call component again
+}
+
+import { useCustomReducer } from "./useCustomReducer";
+
+function counterReducer(state, action) {
+  switch (action.type) {
+    case "inc":
+      return state + 1;
+    case "dec":
+      return state - 1;
+    default:
+      return state;
+  }
+}
+
+function toggleReducer(state, action) {
+  return action === "TOGGLE" ? !state : state;
+}
+
+function App() {
+  const [count, dispatchCount] = useCustomReducer(counterReducer, 0);
+  const [toggle, dispatchToggle] = useCustomReducer(toggleReducer, false);
+
+  console.log("RENDER →", { count, toggle });
+
+  setTimeout(() => dispatchCount({ type: "inc" }), 1000);
+  setTimeout(() => dispatchToggle("TOGGLE"), 1500);
+}
+
+App();
+
+// RENDER → { count: 0, toggle: false }
+// RENDER → { count: 1, toggle: false }
+// RENDER → { count: 1, toggle: true }
