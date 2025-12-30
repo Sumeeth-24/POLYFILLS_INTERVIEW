@@ -33,20 +33,20 @@ Array.prototype.myMap = function (cb) {
     throw new TypeError(cb + "is not a function");
   }
 
-  // 1. Create a temporary array to store the results
+  // 3. Create a temporary array to store the results
   let temp = [];
 
-  // 2. Iterate over each element of the array
+  // 4. Iterate over each element of the array
   for (let i = 0; i < this.length; i++) {
-    // 3. Call the callback function 'cb' on the current element
+    // 5. Call the callback function 'cb' on the current element
     // Pass current element, index, and entire array as arguments
     const mappedValue = cb(this[i], i, this);
 
-    // 4. Push the result of callback into the temp array
+    // 6. Push the result of callback into the temp array
     temp.push(mappedValue);
   }
 
-  // 5. Return the new array with transformed values
+  // 7. Return the new array with transformed values
   return temp;
 };
 
@@ -85,22 +85,22 @@ Array.prototype.myFilter = function (cb) {
     throw new TypeError(cb + "is not a function");
   }
 
-  // 1. Create a temporary array to store the filtered results
+  // 3. Create a temporary array to store the filtered results
   let temp = [];
 
-  // 2. Iterate over each element of the array
+  // 4. Iterate over each element of the array
   for (let i = 0; i < this.length; i++) {
-    // 3. Call the callback function 'cb' on the current element
+    // 5. Call the callback function 'cb' on the current element
     // Pass current element, index, and entire array as arguments
     const shouldInclude = cb(this[i], i, this);
 
-    // 4. If callback returns true, push the element into temp array
+    // 6. If callback returns true, push the element into temp array
     if (shouldInclude) {
       temp.push(this[i]);
     }
   }
 
-  // 5. Return the new array with elements that passed the test
+  // 7. Return the new array with elements that passed the test
   return temp;
 };
 
@@ -284,7 +284,7 @@ try {
 
 // const str = "hello";
 
-// [...str].myEvery.call(str, char => char !== 'z'); // 🚫 this would crash without Object(this)
+// const result = [...str].myEvery((char) => char != 'e'); // 🚫 this would crash without Object(this)
 // But with Object(this), it safely turns "hello" into an object like:
 // {
 //   0: 'h',
@@ -793,7 +793,7 @@ window.addEventListener("resize", myThrottle(onResize, 1000));
 //   // check if the dependency is changed or not
 //   if (
 //     !memoizedRef.current ||
-//     !detectChanges(memoizedRef?.current?.deps, deps)
+//     !detectChangesMemo(memoizedRef?.current?.deps, deps)
 //   ) {
 //     memoizedRef.current = {
 //       value: callback(), // store the computed value returned from the callback
@@ -1050,9 +1050,9 @@ if (!Array.prototype.mySort) {
     compareFn =
       compareFn ||
       function (a, b) {
-        if (a === undefined) return 1;
-        if (b === undefined) return -1;
-        return String(a).localeCompare(String(b));
+        if (a === undefined) return 1; // Push a after b
+        if (b === undefined) return -1; // Keep a before b
+        return String(a).localeCompare(String(b)); // Convert both values to strings. Compare them alphabetically (lexicographically)
       };
 
     const mergeSort = (arr) => {
@@ -1570,118 +1570,287 @@ console.log(sample.slice(3, 1)); // [] → invalid range returns empty array
 // 31. Polyfill: Custom Promise
 // ---------------------------------------------
 
-/**
- * CREATE STATES PENDING, FULFILLED, REJECTED
- * BASIC PROMISE STRUCTURE TAKE A CALLBACK WITH RESOLVE AND REJECT METHOD
- * .THEN WILL TAKE ONSUCCESS AND ONERROR AND CATCH METHOD
- * UPDATE FUNCTION ASYNCHRONOUSLY
- * .THEN ALSO RETURNS A PROMISE
- * onFullFillment array, handlers array to keep a track of .then functions
- */
+// ---------------------------------------------
+// Custom Promise Polyfill (Learning Version)
+// ---------------------------------------------
 
+/**
+ * Promise States
+ * A promise can be in ONLY one of these states
+ */
 const states = {
-  PENDING: "PENDING",
-  FULFILLED: "FULFILLED",
-  REJECTED: "REJECTED",
+  PENDING: "PENDING", // initial state
+  FULFILLED: "FULFILLED", // resolved successfully
+  REJECTED: "REJECTED", // rejected with error
 };
 
 class CustomPromise {
-  constructor(callback) {
+  constructor(executor) {
+    /**
+     * Initial state of promise
+     * Example:
+     * const p = new CustomPromise(...)
+     * → p.state === PENDING
+     */
     this.state = states.PENDING;
-    this.value = undefined;
-    this.handlers = []; // fulfillment array
 
+    /**
+     * Stores resolved value OR rejected reason
+     * Example:
+     * resolve(100) → value = 100
+     * reject("error") → value = "error"
+     */
+    this.value = undefined;
+
+    /**
+     * Queue to store all `.then()` handlers
+     * Example:
+     * promise.then(fn1)
+     * promise.then(fn2)
+     * → handlers = [fn1, fn2]
+     */
+    this.handlers = [];
+
+    /**
+     * Executor is executed IMMEDIATELY
+     * resolve & reject are passed to user
+     *
+     * Example:
+     * new CustomPromise((resolve, reject) => {
+     *   resolve(10);
+     * })
+     */
     try {
-      callback(this._resolve, this._reject);
-    } catch (error) {}
+      // When you write:
+      // new CustomPromise((resolve, reject) => {
+      //   resolve(100);
+      // });
+
+      // This part 👇
+      // (resolve, reject) => {
+      //   resolve(100);
+      // }
+      // 👉 IS the executor
+
+      // “Call the function the user gave me, and give them my resolve and reject methods.”
+
+      executor(this._resolve, this._reject);
+    } catch (error) {
+      /**
+       * If executor throws synchronously
+       * promise should be rejected
+       *
+       * Example:
+       * new Promise(() => {
+       *   throw new Error("Boom");
+       * })
+       */
+      this._reject(error);
+    }
   }
+
+  /**
+   * Adds a `.then()` handler to queue
+   * If promise already resolved → execute immediately
+   */
+
+  //   Case 1: .then() called BEFORE resolve
+  //  const p = new CustomPromise((resolve) => {
+  //   setTimeout(() => resolve(5), 1000);
+  // });
+
+  // p.then(v => console.log(v));
+
+  // Promise is PENDING
+  // Handler is stored
+  // Later, when resolved → execute handlers
+
+  // Case 2: .then() called AFTER resolve
+  // const p = new CustomPromise((resolve) => {
+  //   resolve(5);
+  // });
+
+  // setTimeout(() => {
+  //   p.then(v => console.log(v));
+  // }, 2000);
+
+  // Promise already FULFILLED
+  // Handler should execute immediately
+  // 👉 _executeHandlers handles both cases
 
   _addHandler = (handler) => {
     this.handlers.push(handler);
     this._executeHandlers();
   };
 
+  /**
+   * resolve(value) wrapper
+   * Example:
+   * resolve(100)
+   */
   _resolve = (value) => {
-    // console.log(value)
     this._handleUpdate(states.FULFILLED, value);
   };
 
-  _reject = (value) => {
-    // console.log(value)
-    this._handleUpdate(states.REJECTED, value);
+  /**
+   * reject(reason) wrapper
+   * Example:
+   * reject("Something went wrong")
+   */
+  _reject = (reason) => {
+    this._handleUpdate(states.REJECTED, reason);
   };
 
+  /**
+   * Core state update logic
+   */
   _handleUpdate = (state, value) => {
-    // This line ensures that a promise can only be settled once — either fulfilled or rejected. If a promise is already resolved/rejected (i.e., not pending), we skip further updates.
-    if (this.state !== states.PENDING) {
-      return;
-    }
+    /**
+     * A promise can be settled ONLY ONCE
+     *
+     * Example:
+     * resolve(1)
+     * resolve(2) ❌ ignored
+     */
+    if (this.state !== states.PENDING) return;
 
+    /**
+     * Async behavior
+     * Native Promises use microtasks
+     * Here we simulate async using setTimeout
+     */
     setTimeout(() => {
-      // This checks if the resolved value is another promise (i.e., a thenable), and if so, we must wait for that promise to resolve/reject first.
-      // const inner = new CustomPromise((res) => setTimeout(() => res("done"), 1000));
-      // const outer = new CustomPromise((res) => res(inner));
+      /**
+       * Promise unwrapping (flattening)
+       *
+       * Example:
+       * const inner = new CustomPromise(res => res(10));
+       * const outer = new CustomPromise(res => res(inner));
+       *
+       * outer should resolve AFTER inner resolves
+       */
       if (value instanceof CustomPromise) {
-        value.then(this._resolve, this._reject);
+        return value.then(this._resolve, this._reject);
       }
+
+      /**
+       * Lock the state and store value
+       */
       this.state = state;
       this.value = value;
 
+      /**
+       * Execute all queued `.then()` handlers
+       */
       this._executeHandlers();
-    }, 500);
+    }, 0);
   };
 
+  /**
+   * Executes stored handlers once promise is settled
+   */
   _executeHandlers = () => {
-    if (this.state === states.PENDING) {
-      return;
-    }
+    /**
+     * If still pending → wait
+     */
+    if (this.state === states.PENDING) return;
 
+    /**
+     * Run all handlers
+     *
+     * Example:
+     * promise.then(v => console.log(v))
+     * promise.then(v => console.log(v * 2))
+     */
     this.handlers.forEach((handler) => {
-      // fulfilled
       if (this.state === states.FULFILLED) {
-        return handler.onSuccess(this.value);
+        handler.onSuccess(this.value);
+      } else {
+        handler.onFailure(this.value);
       }
-
-      // rejected
-      return handler.onFailure(this.value);
     });
+
+    /**
+     * Clear handlers to avoid memory leaks
+     */
+    this.handlers = [];
   };
 
+  /**
+   * then() always returns a NEW promise
+   */
   then = (onSuccess, onFailure) => {
+    /**
+     * Example:
+     * promise
+     *   .then(v => v + 1)
+     *   .then(v => console.log(v))
+     */
     return new CustomPromise((resolve, reject) => {
       this._addHandler({
         onSuccess: (value) => {
+          /**
+           * If no success handler
+           * pass value to next promise
+           */
           if (!onSuccess) {
             return resolve(value);
           }
+
           try {
-            return resolve(onSuccess(value));
+            /**
+             * Resolve next promise with returned value
+             *
+             * Example:
+             * then(v => v * 2)
+             */
+            const result = onSuccess(value);
+            resolve(result);
           } catch (error) {
-            return reject(error);
+            /**
+             * If handler throws → reject next promise
+             */
+            reject(error);
           }
         },
-        onFailure: (value) => {
+
+        onFailure: (reason) => {
+          /**
+           * If no failure handler
+           * propagate error forward
+           */
           if (!onFailure) {
-            return reject(value);
+            return reject(reason);
           }
+
           try {
-            return reject(onFailure(value));
+            /**
+             * Error handler can RECOVER
+             *
+             * Example:
+             * .catch(err => 10)
+             */
+            const result = onFailure(reason);
+            resolve(result);
           } catch (error) {
-            return reject(error);
+            reject(error);
           }
         },
       });
     });
   };
 
+  /**
+   * catch is just syntactic sugar over then
+   */
   catch = (onFailure) => {
     return this.then(null, onFailure);
   };
 
+  /**
+   * finally runs regardless of resolve/reject
+   */
   finally = (callback) => {
-    // create a new constructor
-    // listen the then and catch method
-    // finally perform the action
     return new CustomPromise((resolve, reject) => {
       let wasResolved;
       let value;
@@ -1705,11 +1874,67 @@ class CustomPromise {
   };
 }
 
+// Why callback() is called inside then and catch
+// callback(); wrong run immediately, ignore async cleanup, not wait for promise settlement
+// Run callback() after promise settles
+// promise
+// .finally(() => console.log("cleanup")) “When promise finishes (success OR error), run cleanup”
+// Why store value and wasResolved
+// You are trying to remember:
+//❓ was the original promise fulfilled or rejected?
+//❓ what was its value or error?
+// Promise.resolve(100).finally(...)
+// val = 100
+// wasResolved = true
+// callback() runs
+// Promise.reject("ERROR").finally(...)
+// err = "ERROR"
+// wasResolved = false
+// callback() runs
+
+// Why return callback(); because callback might be async
+// Example 1: synchronous cleanup
+// finally(() => {
+//   console.log("cleanup");
+// });
+// callback() returns undefined → resolves immediately.
+
+// Example 2: async cleanup
+// finally(() => {
+//   return new Promise(res => setTimeout(res, 1000));
+// });
+
+// Here:
+// callback() returns a promise
+// .then() waits for it
+// 👉 This matches native Promise behavior.
+
+// So:
+// return callback() ensures finally waits for cleanup
+// 🔹 Why .then() is chained to callback()
+
+// Native behavior:
+// Promise.resolve(10)
+//   .finally(() => Promise.resolve("cleanup done"))
+//   .then(val => console.log(val));
+// The 10 is printed after cleanup finishes.
+
+// That’s why:
+// callback() is returned
+// .then() chain pauses until cleanup completes
+
+/**
+ * USAGE EXAMPLE
+ */
 const promise = new CustomPromise((resolve, reject) => {
-  resolve(1000);
+  resolve(100);
 });
 
-promise.then((val) => console.log(val)).catch((err) => console.error(err));
+promise
+  .then((val) => val + 50)
+  .then((val) => console.log(val)) // 150
+  .catch((err) => console.error(err))
+  .finally(() => console.log("Done"));
 
 // ---------------------------------------------
 // 32. Polyfill: Promise.Race
@@ -2058,33 +2283,92 @@ Array.prototype.flatMapPolyfill = function (callback) {
 //  Finds all DOM elements that match a specific computed style
 // ---------------------------------------------
 
-function getElementByStyles(property, value) {
-  const allElements = document.querySelectorAll("*"); // 🌐 Select ALL elements in the document
+function getElementsByComputedStyle(property, expectedValue) {
+  /**
+   * 🧠 SAFETY CHECK #1
+   * CSS properties must be provided in camelCase
+   * (e.g., backgroundColor, not background-color)
+   */
+  if (!property) {
+    throw new Error("CSS property is required");
+  }
 
-  return Array.from(allElements).filter((el) => {
+  /**
+   * 🌐 Select all elements in the document
+   * Using getElementsByTagName("*") instead of querySelectorAll("*")
+   *
+   * WHY?
+   * - Slightly better performance
+   * - Returns a live HTMLCollection (browser-native)
+   * - Avoids unnecessary CSS selector parsing
+   */
+  const allElements = document.getElementsByTagName("*");
+
+  /**
+   * 🎯 Result array
+   * We manually push instead of filter for better clarity + debugging
+   */
+  const matchedElements = [];
+
+  /**
+   * 🔁 Loop through every DOM element
+   */
+  for (let el of allElements) {
     /**
      * 🧠 window.getComputedStyle(el)
-     * - Returns the **final, rendered styles** as calculated by the browser.
-     * - Includes:
-     *   ✅ External stylesheets (e.g., CSS files)
-     *   ✅ Internal styles (<style> tags)
-     *   ✅ Inline styles (<div style="...">)
-     *   ✅ Inherited styles
-     *   ✅ Default user-agent styles (browser default CSS)
+     * It is a Browser API
+        Provided by the window object
+        Part of the CSS Object Model (CSSOM)
+        Only works in browsers (not Node.js)
      *
-     * ❌ It does NOT only return `el.style` (inline styles only)
+     * This returns the FINAL style calculated by the browser
+     * after applying:
+     * - External CSS files
+     * - <style> tags
+     * - Inline styles
+     * - Inherited styles
+     * - Browser default styles
      *
-     * 📌 Use this when you want to inspect how the browser *actually* styles an element.
+     *  ❌ Not just el.style (which only checks inline styles)
+     *
+     * Example:
+     * <div class="box"></div>
+     * CSS: .box { display: flex }
+     *
+     * el.style.display ❌ "" (empty)
+     * getComputedStyle(el).display ✅ "flex"
      */
-    const style = window.getComputedStyle(el);
+    const computedStyle = window.getComputedStyle(el);
 
-    // 🎯 Return elements where the target style matches the expected value (e.g., display === 'flex')
-    return style[property] === value;
-  });
+    /**
+     * 🛡 SAFETY CHECK #2
+     * Some properties may not exist on certain elements
+     */
+    if (!computedStyle[property]) continue;
+
+    /**
+     * 🎯 Matching logic
+     *
+     * Example:
+     * property = "display"
+     * expectedValue = "flex"
+     *
+     * computedStyle["display"] === "flex" ✅
+     */
+    if (computedStyle[property] === expectedValue) {
+      matchedElements.push(el);
+    }
+  }
+
+  /**
+   * ✅ Return all matched DOM elements
+   */
+  return matchedElements;
 }
 
-const flexElements = getElementByStyles("display", "flex");
-console.log(flexElements); // Outputs all elements with display: flex
+// Find all flex containers
+const flexElements = getElementsByComputedStyle("display", "flex");
+console.log(flexElements);
 
 // ---------------------------------------------
 //  38. UseEffect
