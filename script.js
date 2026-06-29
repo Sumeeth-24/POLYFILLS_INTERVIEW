@@ -369,7 +369,7 @@ Array.prototype.myFind = function (cb, thisArg) {
 Array.prototype.myFindIndex = function (cb, thisArg) {
   if (this == null) {
     throw new TypeError(
-      "Array.prototype.myFindIndex called on null or undefined"
+      "Array.prototype.myFindIndex called on null or undefined",
     );
   }
   if (typeof cb !== "function") {
@@ -401,7 +401,7 @@ Array.prototype.myFindIndex = function (cb, thisArg) {
 Array.prototype.myForEach = function (cb, thisArg) {
   if (this == null) {
     throw new TypeError(
-      "Array.prototype.myForEach called on null or undefined"
+      "Array.prototype.myForEach called on null or undefined",
     );
   }
   if (typeof cb !== "function") {
@@ -523,6 +523,7 @@ Function.prototype.myCall = function (context, ...args) {
   }
 
   // 2. If context is null or undefined, default to globalThis (window or global)
+  // globalThis is a standard, environment-independent way to access the global object
   context = context != null && context !== undefined ? context : globalThis;
 
   // 3. Ensure context is an object (in case of primitives like string or number)
@@ -611,7 +612,7 @@ let car1 = {
 
 function purchaseCar(currency, price) {
   console.log(
-    `I have purchased ${this.color} - ${this.company} car for ${currency}${price}`
+    `I have purchased ${this.color} - ${this.company} car for ${currency}${price}`,
   );
 }
 
@@ -1106,7 +1107,7 @@ if (!String.prototype.repeat) {
     // Step 1: Throw error if called on null or undefined
     if (this == null)
       throw new TypeError(
-        "String.prototype.repeat called on null or undefined"
+        "String.prototype.repeat called on null or undefined",
       );
 
     // Step 2: Convert `this` to a string
@@ -1248,8 +1249,8 @@ console.log(elements); // [<div id = "box">Box 1</div>, <div id = "box">Box 2</d
 
 // -------------------------------------------
 // 26. Polyfill for clearAllTimeout
-// Write a polyfill for clearAllTimeout that tracks and clears all timeouts set
-// using setTimeout.
+//    ClearAllTimeout clears all the setTimeout which are active.
+//    setTimeout is an asynchronous function that executes a function or a piece of code after a specified amount of time.
 // -------------------------------------------
 
 // Global array to track all active timeout IDs
@@ -1962,10 +1963,10 @@ function promiseRace(promises) {
 
 function testPromiseRace() {
   const promise1 = new Promise((resolve) =>
-    setTimeout(() => resolve("Promise 1"), 1000)
+    setTimeout(() => resolve("Promise 1"), 1000),
   );
   const promise2 = new Promise((_, reject) =>
-    setTimeout(() => reject("Promise 2 Error"), 800)
+    setTimeout(() => reject("Promise 2 Error"), 800),
   );
   const nonPromiseValue = "Immediate Value";
 
@@ -2158,7 +2159,7 @@ const promisesAllSettled2 = [
 ];
 
 promiseAllSettled(promisesAllSettled2).then((result) =>
-  console.log("Resolved with:", result)
+  console.log("Resolved with:", result),
 );
 // Output: [
 //  {status: 'fulfilled', value: 'A'},
@@ -2169,7 +2170,7 @@ promiseAllSettled(promisesAllSettled2).then((result) =>
 const promisesAllSettled3 = [42, "hello", Promise.resolve("world")];
 
 promiseAllSettled(promisesAllSettled3).then((result) =>
-  console.log("Resolved with:", result)
+  console.log("Resolved with:", result),
 );
 // Output: [
 //  {status: 'fulfilled', value: 42},
@@ -2180,7 +2181,7 @@ promiseAllSettled(promisesAllSettled3).then((result) =>
 const promisesAllSettled4 = [];
 
 promiseAllSettled(promisesAllSettled4).then((result) =>
-  console.log("Resolved with:", result)
+  console.log("Resolved with:", result),
 );
 // Output: []
 
@@ -2255,12 +2256,12 @@ console.log(result3); // Output: {"3": ["one", "two"], "5": ["three"]}
 // // Group by deep property path
 const result4 = groupBy(
   [{ a: { b: { c: 1 } } }, { a: { b: { c: 2 } } }],
-  "a.b.c"
+  "a.b.c",
 );
 console.log(result4); // Output: {"1": [{ a: { b: { c: 1}}}], "2": [{ a: { b: { c: 2}}}]}
 
 // ---------------------------------------------
-// 36. Polyfill: FlatMap
+// 37. Polyfill: FlatMap
 /**
  * flatMap() is a combination of map() followed by flat(1).
  * reduce() is used to iterate and accumulate the transformed and flattened array.
@@ -2279,42 +2280,19 @@ Array.prototype.flatMapPolyfill = function (callback) {
 };
 
 // ---------------------------------------------
-//  37. Utility: getElementByStyles()
+//  38. Utility: getElementByStyles()
 //  Finds all DOM elements that match a specific computed style
 // ---------------------------------------------
 
-function getElementsByComputedStyle(property, expectedValue) {
-  /**
-   * 🧠 SAFETY CHECK #1
-   * CSS properties must be provided in camelCase
-   * (e.g., backgroundColor, not background-color)
-   */
-  if (!property) {
-    throw new Error("CSS property is required");
-  }
+const getPropertyComputedValue = (property, value) => {
+  // create a new element
+  const div = document.createElement("div");
 
-  /**
-   * 🌐 Select all elements in the document
-   * Using getElementsByTagName("*") instead of querySelectorAll("*")
-   *
-   * WHY?
-   * - Slightly better performance
-   * - Returns a live HTMLCollection (browser-native)
-   * - Avoids unnecessary CSS selector parsing
-   */
-  const allElements = document.getElementsByTagName("*");
+  // apply the property to the element
+  div.style[property] = value;
 
+  // get the computed style of the div
   /**
-   * 🎯 Result array
-   * We manually push instead of filter for better clarity + debugging
-   */
-  const matchedElements = [];
-
-  /**
-   * 🔁 Loop through every DOM element
-   */
-  for (let el of allElements) {
-    /**
      * 🧠 window.getComputedStyle(el)
      * It is a Browser API
         Provided by the window object
@@ -2338,40 +2316,56 @@ function getElementsByComputedStyle(property, expectedValue) {
      * el.style.display ❌ "" (empty)
      * getComputedStyle(el).display ✅ "flex"
      */
-    const computedStyle = window.getComputedStyle(el);
+  const styles = window.getComputedStyle(document.body.appendChild(div));
 
-    /**
-     * 🛡 SAFETY CHECK #2
-     * Some properties may not exist on certain elements
-     */
-    if (!computedStyle[property]) continue;
+  // get the computed value of the property
+  let computedValue = styles[property];
 
-    /**
-     * 🎯 Matching logic
-     *
-     * Example:
-     * property = "display"
-     * expectedValue = "flex"
-     *
-     * computedStyle["display"] === "flex" ✅
-     */
-    if (computedStyle[property] === expectedValue) {
-      matchedElements.push(el);
+  // remove the div
+  document.body.removeChild(div);
+
+  // return the computed value
+  return computedValue;
+};
+
+function getElementsByStyle(rootElement, property, value) {
+  // get the computed value of the property, this will make sure we are checking the values that are applied in the browser
+  const computedValue = getPropertyComputedValue(property, value);
+
+  // to store the result
+  const result = [];
+
+  // helper function to traverse the DOM
+  const search = (element, property, value) => {
+    // get the computed styles of the element
+    let computedStyles = window.getComputedStyle(element);
+    let elementPropertyValue = computedStyles[property];
+
+    // if both the values match
+    // store the result
+    if (elementPropertyValue === computedValue) {
+      result.push(element);
     }
-  }
 
-  /**
-   * ✅ Return all matched DOM elements
-   */
-  return matchedElements;
+    // recursively search for each child of the element
+    for (const child of element.children) {
+      search(child, property, value);
+    }
+  };
+
+  // begin the search
+  search(rootElement, property, value);
+
+  // return the result
+  return result;
 }
 
 // Find all flex containers
-const flexElements = getElementsByComputedStyle("display", "flex");
+const flexElements = getElementsByStyle("display", "flex");
 console.log(flexElements);
 
 // ---------------------------------------------
-//  38. UseEffect
+//  39. UseEffect
 // ---------------------------------------------
 import { useEffect, useRef } from "react";
 
@@ -2461,7 +2455,7 @@ export default useCustomEffect;
 // If you bypass React’s scheduling, the entire lifecycle breaks.
 
 // ---------------------------------------------
-//  39. UseState
+//  40. UseState
 // ---------------------------------------------
 let globalState = []; // Stores all state values for the component
 let stateCursor = 0; // Tracks which state index is currently being used
@@ -2558,7 +2552,7 @@ App(); // first render
 // Because React supports functional updates to avoid stale closures.
 
 // ---------------------------------------------
-//  40. UseReducer
+//  41. UseReducer
 // ---------------------------------------------
 let globalState = []; // Stores all hook states
 let stateCursor = 0; // Tracks which hook index is currently being read
@@ -2628,3 +2622,125 @@ App();
 // RENDER → { count: 0, toggle: false }
 // RENDER → { count: 1, toggle: false }
 // RENDER → { count: 1, toggle: true }
+
+// ---------------------------------------------
+//  42. What is a Debug Logger Middleware?
+
+// "Normally, dispatch directly sends an action to the reducer. But sometimes we want to log actions, authenticate users, make API calls, or measure execution time without changing the reducer. Middleware sits between dispatch and the reducer to intercept every action."
+// ---------------------------------------------
+
+// "The reducer is a pure function. It takes the current state and an action and returns a new state."
+function reducer(state, action) {
+  // We check which action has been dispatched
+  switch (action.type) {
+    case "INCREMENT":
+      return {
+        ...state, // Copy all existing properties.
+        count: state.count + 1,
+      };
+
+    case "DECREMENT":
+      return {
+        ...state,
+        count: state.count - 1,
+      };
+
+    default:
+      return state; // Unknown actions should return the existing state.
+  }
+}
+
+// Now I need a store to hold the application state
+function createStore(reducer, initialState) {
+  let state = initialState; // Store keeps the current state."
+
+  return {
+    getState() {
+      return state; // Returns the latest state
+    },
+
+    dispatch(action) {
+      // Dispatch sends the action to the reducer.
+      state = reducer(state, action); // The reducer receives the current state and action, computes the next state, and I replace the old state.
+    },
+  };
+}
+
+// Logger Middleware is a Higher Order Function
+const loggerMiddleware = (store) => (next) => (action) => {
+  // First function receives the store because middleware needs access to getState(). next is simply the next dispatch function. Finally we receive the dispatched action.
+  console.log("===== LOGGER =====");
+
+  console.log("Previous State:", store.getState());
+
+  console.log("Action:", action);
+
+  const result = next(action); // Instead of directly calling the reducer, middleware forwards the action using next(). This allows middleware to execute code before and after the reducer.
+
+  console.log("Next State:", store.getState());
+
+  console.log("==================");
+
+  return result; // Always return the result so dispatch behaves normally
+};
+
+// Apply Middleware
+function applyMiddleware(store, middleware) {
+  const originalDispatch = store.dispatch; // I save the original dispatch.
+
+  // middleware(store)
+  // Returns
+  // (next)=>...
+  // Then
+  // (originalDispatch)
+  // Returns
+  // (action)=>...
+  // Finally
+  // store.dispatch(action)
+  // actually becomes
+  // loggerMiddleware(store)(originalDispatch)(action)
+
+  store.dispatch = middleware(store)(originalDispatch); // Now I replace dispatch with a wrapped version.
+
+  return store;
+}
+
+// Create Store
+const store = createStore(reducer, {
+  // Now I create the store with an initial state.
+  count: 0,
+});
+
+// Attach Logger
+applyMiddleware(store, loggerMiddleware); // Now dispatch is replaced by middleware.
+
+// Dispatch Actions
+store.dispatch({
+  type: "INCREMENT",
+});
+
+store.dispatch({
+  type: "INCREMENT",
+});
+
+store.dispatch({
+  type: "DECREMENT",
+});
+
+// dispatch()
+// ↓
+// loggerMiddleware
+// ↓
+// Previous State
+// ↓
+// Action
+// ↓
+// next(action)
+// ↓
+// Reducer
+// ↓
+// State Updated
+// ↓
+// Next State
+// ↓
+// Return
