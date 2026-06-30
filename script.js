@@ -475,8 +475,10 @@ console.log(count); // 1 (only incremented once)
 
 // CALL VS APPLY VS BIND
 
-/* They are Function prototype methods used to invoke functions with a specific this context and arguments.
- * They allow borrowing methods from one object and using them in the context of another. This is useful when passing functions as arguments (callbacks) and the original this context is lost. .call and .apply allow the function to be invoked with the intended this value.
+/* call, apply, and bind are methods on Function.prototype that let us explicitly control the value of this. call invokes the function immediately with comma-separated arguments, apply invokes it immediately with arguments in an array, and bind returns a new function with this (and optionally some arguments) pre-bound for later execution. Common use cases include function borrowing, preserving this in callbacks, and partial application
+
+const greet = person.greet;
+greet() undefined
 /**
  
  * A Symbol is a primitive data type introduced in ES6. It is a unique and immutable value that can be used as an object key without the risk of property name collisions.
@@ -648,19 +650,19 @@ boundPurchase("$", 10000000);
 // -------------------------------------------
 function debounce(fn, delay) {
   // This will store the timeout ID between function calls
-  let timeout;
+  let timeoutId;
 
   // Return a new debounced version of the function
   return function (...args) {
-    // Capture the current `this` context
+    // Capture the current `this` context because the callback inside setTimeout executes later. Without saving this, the original object context would be lost, so fn wouldn't execute with the correct this.
     const context = this;
 
-    // Clear any previously set timeout to reset the wait period
-    clearTimeout(timeout);
+    // Clear any previously set timeoutId to reset the wait period
+    clearTimeout(timeoutId);
 
     // Start a new timer - only if no more calls come in before `delay`,
     // the function `fn` will be called with latest arguments
-    timeout = setTimeout(() => {
+    timeoutId = setTimeout(() => {
       // Use `apply` to call `fn` with the correct `this` and arguments
       fn.apply(context, args);
     }, delay);
@@ -705,20 +707,26 @@ setTimeout(() => {
  */
 
 function myThrottle(fn, interval) {
-  // Store the last time the function was actually executed.
-  // Initialize to a time far enough in the past so the first call runs immediately.
-  let lastCallTime = Date.now() - interval;
+  // Time when fn was last executed
+  let lastCallTime = 0;
 
   // Store a timeout ID if a future execution is scheduled.
   let timeoutId = null;
 
+  // Stores the latest arguments and context
+  let lastArgs;
+  let lastContext;
+
   // Return a throttled version of the original function.
   return function (...args) {
-    // Save the context (`this`) to preserve it inside setTimeout.
     const context = this;
 
     // Get the current time in milliseconds.
     const now = Date.now();
+
+    // Always keep the latest arguments and context
+    lastArgs = args;
+    lastContext = this; // Save the context (`this`) to preserve it inside setTimeout.
 
     // Calculate how much time is left before we can call the function again.
     const remainingTime = interval - (now - lastCallTime);
@@ -729,6 +737,20 @@ function myThrottle(fn, interval) {
      */
     if (remainingTime <= 0) {
       // If a timeout was previously scheduled, clear it (not needed anymore).
+      // Imagine this sequence with a throttle interval of 1000 ms.
+      // 0 ms    A()  -> Executes immediately
+      // 200 ms  B()  -> Schedules a timeout for 1000 ms
+      // Now suppose another call happens after the interval has already passed.
+      // 1200 ms  C()
+      // Since more than 1000 ms has passed since the last execution, we want C to execute immediately.
+      // But notice...
+      // A timeout for B is still waiting to run (or is about to run).
+      // If we don't cancel it:
+      // 1200 ms  C executes immediately
+      // 1200-1300 ms
+      // B timeout also executes
+      // Now you've executed the function twice almost back-to-back.
+
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
@@ -738,7 +760,7 @@ function myThrottle(fn, interval) {
       lastCallTime = now;
 
       // Call the original function with correct context and arguments.
-      fn.apply(context, args);
+      fn.apply(lastContext, lastArgs);
     } else if (!timeoutId) {
       /**
        * 2️⃣ Otherwise, if we're still within the throttle interval,
@@ -752,7 +774,7 @@ function myThrottle(fn, interval) {
         timeoutId = null;
 
         // Call the function with the saved context and arguments.
-        fn.apply(context, args);
+        fn.apply(lastContext, lastArgs);
       }, remainingTime);
     }
 
@@ -767,6 +789,20 @@ function myThrottle(fn, interval) {
 const onResize = () => console.log("Resize event handler called");
 
 window.addEventListener("resize", myThrottle(onResize, 1000));
+
+const throttled = myThrottle((value) => {
+  console.log(value);
+}, 1000);
+
+throttled("A"); // Executes immediately
+
+setTimeout(() => throttled("B"), 100);
+setTimeout(() => throttled("C"), 300);
+setTimeout(() => throttled("D"), 700);
+
+// Output:
+// A
+// D
 
 // -------------------------------------------
 // 15. USEMEMO() & USECALLBACK() Polyfill
@@ -1253,30 +1289,195 @@ console.log(elements); // [<div id = "box">Box 1</div>, <div id = "box">Box 2</d
 //    setTimeout is an asynchronous function that executes a function or a piece of code after a specified amount of time.
 // -------------------------------------------
 
-// Global array to track all active timeout IDs
+// Track all currently active timeout IDs
 const timeoutIds = new Set();
 
-// Override the native setTimeout to keep track of all timeout IDs
-const originalSetTimeout = window.setTimeout; // Preserve the original function
+// Save the original setTimeout before overriding it.
+// Otherwise, calling setTimeout inside our override would cause infinite recursion.
+const originalSetTimeout = window.setTimeout;
 
-window.setTimeout = function (callback, delay) {
-  // Call the original setTimeout and get the timeout ID
-  const timeoutId = originalSetTimeout(callback, delay);
+// Override the native setTimeout
+window.setTimeout = function (callback, delay, ...args) {
+  // Preserve the current `this` context
+  const context = this;
 
-  // Store the timeout ID in the tracking set
+  // Schedule the actual timer using the ORIGINAL setTimeout.
+  // We wrap the callback so we can perform cleanup before executing it.
+
+  // What if we simply did this?
+  // const timeoutId = originalSetTimeout(callback, delay);
+
+  // This works—the callback runs after 3 seconds.
+
+  // But what happens to our Set?
+
+  // timeoutIds = {15}
+
+  // After 3 seconds:
+
+  // Hello
+
+  // The timeout has finished, but 15 is still in the Set because nothing removed it.
+
+  // timeoutIds = {15} ❌
+
+  // So our tracking is now incorrect.
+
+  // That's why we wrap the callback
+
+  // Instead of giving originalSetTimeout the user's callback directly, we give it our own function.
+
+  // originalSetTimeout(function () {
+  //     timeoutIds.delete(timeoutId);
+
+  //     callback.apply(context, args);
+  // }, delay);
+
+  // Think of it like this.
+
+  // Instead of asking JavaScript to do
+
+  // After 3 seconds
+  // ↓
+  // Run user's callback
+
+  // we ask JavaScript to do
+
+  // After 3 seconds
+  // ↓
+
+  // 1. Remove timeout from Set
+  // 2. Run user's callback
+
+  // Our wrapper becomes the callback that setTimeout executes.
+
+  // Timeline
+
+  // Suppose
+
+  // setTimeout(() => console.log("Hello"), 3000);
+  // Step 1
+
+  // Our override is called.
+
+  // timeoutIds = {}
+  // Step 2
+
+  // We schedule
+
+  // originalSetTimeout(function () {
+  //     timeoutIds.delete(timeoutId);
+
+  //     callback.apply(context, args);
+  // }, 3000);
+
+  // Suppose the timer ID is 5.
+
+  // timeoutIds = {5}
+  // Step 3 (after 3 seconds)
+
+  // JavaScript executes our wrapper, not the user's callback directly.
+
+  // Wrapper starts
+
+  // First line:
+
+  // timeoutIds.delete(timeoutId);
+
+  // Now
+
+  // timeoutIds = {}
+
+  // Great! The timer is no longer active.
+
+  // Second line:
+
+  // callback.apply(context, args);
+
+  // This finally executes
+
+  // console.log("Hello");
+
+  // Output
+  // Hello
+
+  // Everything is now cleaned up correctly.
+
+  // Think of it like a receptionist
+
+  // Imagine the user says:
+
+  // "Please call me after 3 PM."
+
+  // If JavaScript called the user directly:
+
+  // 3 PM
+  // ↓
+  // User answers
+
+  // No cleanup happens.
+
+  // Instead, we tell JavaScript:
+
+  // "Call me first."
+
+  // So at 3 PM:
+
+  // Receptionist answers
+  // ↓
+  // Remove appointment from diary
+  // ↓
+  // Transfer the call to the user
+
+  // The receptionist is our wrapper function.
+
+  // The user is callback.
+
+  // Why not do this after setTimeout?
+
+  // Some people think this should work:
+
+  // const timeoutId = originalSetTimeout(callback, delay);
+
+  // timeoutIds.delete(timeoutId);
+  // But that runs immediately, not after 3 seconds.
+
+  // Timeline:
+  // 0 sec
+
+  // Schedule timer
+  // ↓
+  // Delete from Set ❌
+  // ↓
+  // 3 sec later
+  // Callback runs
+
+  // Now clearAllTimeout() can't find that timer because you removed it too early.
+  // So the deletion must happen inside the callback, when the timer actually finishes.
+
+  const timeoutId = originalSetTimeout(function () {
+    // Timer has finished executing, so it's no longer active.
+    timeoutIds.delete(timeoutId);
+
+    // Execute the original callback with the correct `this` and arguments.
+    callback.apply(context, args);
+  }, delay);
+
+  // Track this timer so clearAllTimeout() can cancel it later.
   timeoutIds.add(timeoutId);
 
-  return timeoutId; // Return the timeout ID so it can be used normally
+  // Return the timeout ID just like the native implementation.
+  return timeoutId;
 };
 
-// Function to clear all timeouts
+// Clear all active timeouts
 function clearAllTimeout() {
-  // Iterate through all stored timeout IDs
+  // Cancel every active timer.
   timeoutIds.forEach((timeoutId) => {
-    clearTimeout(timeoutId); // Clear each timeout
+    clearTimeout(timeoutId);
   });
 
-  // After clearing, reset the tracking array to remove all references
+  // Remove all references since no timers are active anymore.
   timeoutIds.clear();
 }
 
