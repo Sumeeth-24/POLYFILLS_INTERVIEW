@@ -296,7 +296,6 @@ try {
 // }
 
 // -------------------------------------------
-// 4. Some Polyfill
 // -------------------------------------------
 /**
  * Polyfill for Array.prototype.some
@@ -475,7 +474,17 @@ console.log(count); // 1 (only incremented once)
 
 // CALL VS APPLY VS BIND
 
-/* call, apply, and bind are methods on Function.prototype that let us explicitly control the value of this. call invokes the function immediately with comma-separated arguments, apply invokes it immediately with arguments in an array, and bind returns a new function with this (and optionally some arguments) pre-bound for later execution. Common use cases include function borrowing, preserving this in callbacks, and partial application
+/* call, apply, and bind are methods that let you decide what this should refer to inside a function.
+Think of them as borrowing a function and telling it who should be "this"
+call() → Sets this and invokes the function immediately. Arguments are passed individually.
+apply() → Sets this and invokes the function immediately. Arguments are passed as an array.
+bind() → Sets this but does not invoke the function immediately. It returns a new function that can be called later.
+Arrow Function Behavior: call(), apply() cannot change this for an arrow function because arrow functions don't have their own this. They lexically inherit this from the surrounding scope.
+bind() does not change this for an arrow function. It still returns a new function, but the arrow function keeps the this from the scope where it was created.
+
+Normal functions determine this when they are called, so call, apply, and bind can override it.
+
+Arrow functions determine this when they are created, so it is permanently taken from the surrounding (lexical) scope and cannot be overridden.
 
 const greet = person.greet;
 greet() undefined
@@ -719,8 +728,6 @@ function myThrottle(fn, interval) {
 
   // Return a throttled version of the original function.
   return function (...args) {
-    const context = this;
-
     // Get the current time in milliseconds.
     const now = Date.now();
 
@@ -1233,7 +1240,7 @@ document.myGetElementById = function (id) {
     return null; // If no match is found in this branch
   }
 
-  return searchElement(document.body);
+  return searchElement(document.documentElement);
 };
 
 // Example HTML
@@ -1270,7 +1277,7 @@ document.myGetElementByClassName = function (className) {
     }
   }
 
-  searchElements(document.body); // Start searching from the document body
+  searchElements(document.documentElement); // Start searching from the document body
 
   return result; // Return all matched elements
 };
@@ -1492,21 +1499,11 @@ setTimeout(() => {
   clearAllTimeout();
 }, 5000);
 
-// Expected Output:
-// "Clearing all timeouts..."  (after 5 sec)
-// Timeout 2 & Timeout 3 **should not execute** since they are cleared
+// "Timeout 2"
+// "Timeout 3"
+// "Clearing all timeouts..."
 
-// DOUBTS
-// const originalSetTimeout = window.setTimeout;
-
-// Why?
-// We need to track every timeout that is created.
-// But if we directly modify window.setTimeout, we lose access to the original function.
-// So, we first store the original setTimeout in a variable called originalSetTimeout
-
-// window.setTimeout = function(callback, delay) {}
-// We are replacing the default setTimeout with our own version.
-// Whenever someone calls setTimeout(), our own version will run instead of the native one.
+// clearAllTimeout() only cancels timers that are still pending, which matches how the native clearTimeout() behaves: you cannot cancel a timeout that has already started executing.
 
 // -------------------------------------------
 // 27 & 28 Polyfill for setTimeout & setInterval
@@ -1545,6 +1542,13 @@ window.setTimeout = function (callback, delay, ...args) {
 
   // Start idle loop if this is the first scheduled timeout
   if (Object.keys(window[TIMERS]).length === 1) {
+    // Schedule our scheduler.
+    // requestIdleCallback lets the browser invoke processTimers during idle
+    // periods, reducing main-thread blocking. Note that this is not an exact
+    // replacement for the native setTimeout scheduler.
+
+    // I'm using requestIdleCallback only to demonstrate manual scheduling. This isn't a spec-compliant implementation because callback execution depends on browser idle time
+
     requestIdleCallback(processTimers);
     // ⬆️ Why: requestIdleCallback ensures we don’t block the main thread
     //        and only process when the browser is idle (low-priority task)
@@ -1772,10 +1776,6 @@ console.log(sample.slice(3, 1)); // [] → invalid range returns empty array
 // 31. Polyfill: Custom Promise
 // ---------------------------------------------
 
-// ---------------------------------------------
-// Custom Promise Polyfill (Learning Version)
-// ---------------------------------------------
-
 /**
  * Promise States
  * A promise can be in ONLY one of these states
@@ -1835,7 +1835,8 @@ class CustomPromise {
       // 👉 IS the executor
 
       // “Call the function the user gave me, and give them my resolve and reject methods.”
-
+      // Pass our resolve/reject functions to the executor.
+      // They are arrow functions, so `this` stays bound to this promise instance.
       executor(this._resolve, this._reject);
     } catch (error) {
       /**
@@ -1922,6 +1923,8 @@ class CustomPromise {
      * Here we simulate async using setTimeout
      */
     setTimeout(() => {
+      // check again
+      if (this.state !== states.PENDING) return;
       /**
        * Promise unwrapping (flattening)
        *
@@ -2050,80 +2053,59 @@ class CustomPromise {
   };
 
   /**
-   * finally runs regardless of resolve/reject
+   * finally(callback)
+   *
+   * Runs regardless of whether the promise is fulfilled or rejected.
+   *
+   * Native behavior:
+   * - Does NOT receive the promise's value or error.
+   * - Waits if the callback returns a promise.
+   * - Preserves the original fulfillment value or rejection reason.
+   *
+   * Example:
+   * Promise.resolve(10)
+   *   .finally(() => console.log("Cleanup"))
+   *   .then(console.log); // 10
+   *
+   * Promise.reject("Error")
+   *   .finally(() => console.log("Cleanup"))
+   *   .catch(console.error); // Error
    */
   finally = (callback) => {
-    return new CustomPromise((resolve, reject) => {
-      let wasResolved;
-      let value;
+    return this.then(
+      (value) => {
+        /**
+       * Run the cleanup callback after successful completion.
+       *
+       * callback() may return:
+       * - nothing
+       * - a value
+       * - another CustomPromise
+       *
+       * Wrapping it with CustomPromise.resolve() ensures we wait
+       * for asynchronous cleanup before continuing.
+       * 
+       * Run the cleanup.
+        If it returns a promise, wait for it.
+        Once cleanup finishes, continue with the original value.
+       */
+        return CustomPromise.resolve(callback()).then(() => value);
+      },
 
-      this.then((val) => {
-        value = val;
-        wasResolved = true;
-        return callback();
-      }).catch((err) => {
-        value = err;
-        wasResolved = false;
-        return callback();
-      });
-
-      if (wasResolved) {
-        resolve(value);
-      } else {
-        reject(value);
-      }
-    });
+      (reason) => {
+        /**
+         * Run the same cleanup callback after failure.
+         *
+         * After cleanup finishes, rethrow the original error so the
+         * rejection continues down the promise chain.
+         */
+        return CustomPromise.resolve(callback()).then(() => {
+          throw reason;
+        });
+      },
+    );
   };
 }
-
-// Why callback() is called inside then and catch
-// callback(); wrong run immediately, ignore async cleanup, not wait for promise settlement
-// Run callback() after promise settles
-// promise
-// .finally(() => console.log("cleanup")) “When promise finishes (success OR error), run cleanup”
-// Why store value and wasResolved
-// You are trying to remember:
-//❓ was the original promise fulfilled or rejected?
-//❓ what was its value or error?
-// Promise.resolve(100).finally(...)
-// val = 100
-// wasResolved = true
-// callback() runs
-// Promise.reject("ERROR").finally(...)
-// err = "ERROR"
-// wasResolved = false
-// callback() runs
-
-// Why return callback(); because callback might be async
-// Example 1: synchronous cleanup
-// finally(() => {
-//   console.log("cleanup");
-// });
-// callback() returns undefined → resolves immediately.
-
-// Example 2: async cleanup
-// finally(() => {
-//   return new Promise(res => setTimeout(res, 1000));
-// });
-
-// Here:
-// callback() returns a promise
-// .then() waits for it
-// 👉 This matches native Promise behavior.
-
-// So:
-// return callback() ensures finally waits for cleanup
-// 🔹 Why .then() is chained to callback()
-
-// Native behavior:
-// Promise.resolve(10)
-//   .finally(() => Promise.resolve("cleanup done"))
-//   .then(val => console.log(val));
-// The 10 is printed after cleanup finishes.
-
-// That’s why:
-// callback() is returned
-// .then() chain pauses until cleanup completes
 
 /**
  * USAGE EXAMPLE
@@ -2136,28 +2118,37 @@ promise
   .then((val) => val + 50)
   .then((val) => console.log(val)) // 150
   .catch((err) => console.error(err))
-  .finally(() => console.log("Done"));
+  .finally(() => console.log("Done"))
+  .then(() => console.log("Promise Implemented successfully"));
 
 // ---------------------------------------------
 // 32. Polyfill: Promise.Race
+
 /**
- * observations
- * iterable of promises and returns a single promise
- * This returned promise settles with the first promise that settles
+ * Returns a promise that settles as soon as the FIRST input settles.
+ * The winner can either:
+ * - resolve
+ * - reject
  *
- * Approach
- * accepts an iterable like an array
- * iterate through promises
- * returned promise will settle(either resolve or reject) as soon as the first promise settles
- * if the promise resolves, the returned promise resolves with the same value
- * if the promise rejects, the returned promised rejects with the same reason
+ * Remaining promises are ignored once the first one settles.
  */
 
 function promiseRace(promises) {
   return new Promise((resolve, reject) => {
     promises.forEach((promise) => {
-      Promise.resolve(promise) // added check for non-promise value
-        .then(resolve, reject); // The first to settle (resolve OR reject) will "win" the race
+      Promise.resolve(promise)
+        // Why Promise.resolve()?
+        // It converts non-promise values into resolved promises.
+        //
+        // Example:
+        // Promise.resolve(10) → Promise that immediately resolves with 10
+        //
+        // This lets Promise.race() work with both promises and plain values.
+        .then(resolve, reject);
+      // The first promise to settle wins the race.
+      // If it resolves → resolve the returned promise.
+      // If it rejects → reject the returned promise.
+      // Later results are ignored because a promise settles only once.
     });
   });
 }
@@ -2181,44 +2172,92 @@ testPromiseRace();
 
 // ---------------------------------------------
 // 33. Polyfill: Promise.Any
+
 /**
- * observations
- *
- * iterable of promises and return a single promise
- * returned promise is fulfilled with this first fulfillment value
- * it rejects when all of the input's promises reject including an empty array
- * containing an array of rejection reason
+ * Observations
+ * • Accepts an iterable of promises (or plain values).
+ * • Returns a single promise.
+ * • Resolves as soon as the FIRST promise fulfills.
+ * • Rejects ONLY if ALL input promises reject.
+ * • Rejects with an AggregateError containing every rejection reason
+ *   in the same order as the input iterable.
+ * • An empty iterable immediately rejects with AggregateError.
  *
  * Approach
- * create a new promise to track the fulfillment/rejection
- * iterate over the array of promises
- * resolve the promise as soon as any promise in the array fulfills
- * if all promises reject, reject the new promise with the array of rejection reasons
+ * 1. Convert the iterable into an array so we know its length.
+ * 2. Resolve immediately when the first promise fulfills.
+ * 3. Store rejection reasons using their original index.
+ * 4. Count rejected promises.
+ * 5. Reject only if every promise rejects.
+ *
+ * Time Complexity: O(n)
+ * Space Complexity: O(n)
  */
 
 function promiseAny(promises) {
+  // Number of promises that have rejected so far.
+  // Used to determine when ALL promises have failed.
   let rejectedCount = 0;
+
+  // Stores rejection reasons in their ORIGINAL input order.
+  // Native Promise.any() preserves input order even if
+  // promises reject in a different order.
   const reasons = [];
-  const promiseArray = Array.from(promises); // in case it's an iterable
+
+  // Promise.any() accepts any iterable (Array, Set, etc.).
+  // Convert it into an array so we can easily determine its length.
+  const promiseArray = Array.from(promises);
 
   return new Promise((resolve, reject) => {
+    // Edge case:
+    // Promise.any([]) immediately rejects because there is
+    // no promise that can ever fulfill.
     if (promiseArray.length === 0) {
-      // Immediately reject with AggregateError
       reject(new AggregateError([], "All promises were rejected"));
       return;
     }
 
     promiseArray.forEach((promise, index) => {
-      Promise.resolve(promise)
-        .then(resolve)
-        .catch((reason) => {
+      // Promise.resolve() converts non-promise values into
+      // resolved promises.
+      //
+      // Example:
+      // Promise.resolve(10)
+      // behaves like an already fulfilled promise with value 10.
+      //
+      // This allows Promise.any() to work with both promises
+      // and normal JavaScript values.
+      Promise.resolve(promise).then(
+        // As soon as the FIRST promise fulfills,
+        // resolve the returned promise.
+        //
+        // Any later fulfillments/rejections are ignored because
+        // a Promise can settle only once.
+        resolve,
+
+        (reason) => {
+          // Store the rejection reason using its ORIGINAL index.
+          //
+          // Example:
+          // Input:
+          // [P1, P2, P3]
+          //
+          // Even if P3 rejects before P1,
+          // AggregateError.errors should still be:
+          // [reason1, reason2, reason3]
           reasons[index] = reason;
+
+          // Track how many promises have rejected.
           rejectedCount++;
 
+          // Only reject after EVERY promise has rejected.
           if (rejectedCount === promiseArray.length) {
+            // AggregateError groups every rejection reason
+            // into a single error object.
             reject(new AggregateError(reasons, "All promises were rejected"));
           }
-        });
+        },
+      );
     });
   });
 }
@@ -2251,41 +2290,86 @@ promiseAny(promises4)
 
 // ---------------------------------------------
 // 34. Polyfill: Promise.All
+
 /**
- * observations
- *
- * iterable of promises and return a single promise
- * returned promise is fulfilled when all of them fulfilled including empty array
- * returns rejected promise with the first rejection reason
+ * Observations
+ * • Accepts an iterable of promises (or plain values).
+ * • Returns a single promise.
+ * • Resolves ONLY when ALL input promises fulfill.
+ * • Resolves with an array of fulfillment values in the SAME order
+ *   as the input iterable, regardless of completion order.
+ * • Rejects immediately as soon as the FIRST promise rejects.
+ * • An empty iterable immediately resolves with an empty array.
  *
  * Approach
- * iterate over the array of promise
- * track the resolution status of each promise
- * if all the promises resolve, resolve the new promise with an array of resolved values
- * if any promise rejects, reject with the first rejection reason
+ * 1. Convert the iterable into an array so we know its length.
+ * 2. Wrap every input with Promise.resolve() to support non-promise values.
+ * 3. Store each fulfilled value at its original index.
+ * 4. Count how many promises have fulfilled.
+ * 5. Resolve once every promise has fulfilled.
+ * 6. Reject immediately if any promise rejects.
+ *
+ * Time Complexity: O(n)
+ * Space Complexity: O(n)
  */
 
 function promiseAll(promises) {
-  const promiseArray = Array.from(promises); // in case it's iterable, not an array
+  // Promise.all() accepts any iterable (Array, Set, etc.).
+  // Convert it into an array so we can determine its length
+  // and preserve the original order.
+  const promiseArray = Array.from(promises);
 
+  // Edge case:
+  // Promise.all([]) immediately resolves because there are
+  // no pending promises to wait for.
   if (promiseArray.length === 0) {
     return Promise.resolve([]);
   }
 
+  // Stores fulfilled values in their ORIGINAL input order.
+  // Even if promises resolve out of order, the final result
+  // must match the order of the input iterable.
   const results = [];
+
+  // Tracks how many promises have fulfilled successfully.
   let completed = 0;
 
   return new Promise((resolve, reject) => {
     promiseArray.forEach((promise, index) => {
-      Promise.resolve(promise)
-        .then((value) => {
+      // Promise.resolve() converts non-promise values into
+      // resolved promises.
+      //
+      // Example:
+      // Promise.resolve(10)
+      // behaves like an already fulfilled promise with value 10.
+      //
+      // This allows Promise.all() to work with both promises
+      // and plain JavaScript values.
+      Promise.resolve(promise).then(
+        (value) => {
+          // Store the fulfilled value at its ORIGINAL index.
+          // This preserves input order regardless of which
+          // promise finishes first.
           results[index] = value;
+
+          // Track one more successful promise.
           completed++;
+
+          // Only resolve after EVERY promise has fulfilled.
           if (completed === promiseArray.length) {
             resolve(results);
           }
-        })
-        .catch(reject); // Reject immediately on first error
+        },
+
+        // Promise.all() is fail-fast.
+        // As soon as the FIRST promise rejects,
+        // reject the returned promise immediately.
+        //
+        // Remaining promises may continue executing,
+        // but their results are ignored because a Promise
+        // can settle only once.
+        reject,
+      );
     });
   });
 }
@@ -2298,7 +2382,7 @@ const promisesAll1 = [
 
 promiseAll(promisesAll1)
   .then((result) => console.log("Resolved with:", result))
-  .catch((error) => console.log("Rejected with:", error.message));
+  .catch((error) => console.log("Rejected with:", error));
 
 const promisesAll2 = [
   Promise.reject("A"),
@@ -2308,43 +2392,106 @@ const promisesAll2 = [
 
 promiseAll(promisesAll2)
   .then((result) => console.log("Resolved with:", result))
-  .catch((error) => console.log("Rejected with:", error.message)); // Should print: Rejected with: All promises were rejected
+  .catch((error) => console.log("Rejected with:", error)); // Should print: Rejected with: All promises were rejected
 
 const promisesAll3 = [42, "hello", Promise.resolve("world")];
 promiseAll(promisesAll3)
   .then((result) => console.log("Resolved with:", result)) // Should print: Resolved with: [42, "hello", "world"]
-  .catch((error) => console.log("Rejected with:", error.message));
+  .catch((error) => console.log("Rejected with:", error));
 
 const promisesAll4 = [];
 promiseAll(promisesAll4)
   .then((result) => console.log("Resolved with:", result)) // Should print: Resolved with: []
-  .catch((error) => console.log("Rejected with 4:", error.message));
+  .catch((error) => console.log("Rejected with 4:", error));
+
 // ---------------------------------------------
 
 // ---------------------------------------------
 // 35. Polyfill: Promise.AllSettled
 // ---------------------------------------------
 
+/**
+ * Observations
+ * • Accepts an iterable of promises (or plain values).
+ * • Returns a single promise.
+ * • Waits until EVERY input promise settles.
+ * • Never rejects.
+ * • Resolves with an array describing the outcome of each promise.
+ * • Preserves the ORIGINAL input order regardless of completion order.
+ * • An empty iterable immediately resolves with an empty array.
+ *
+ * Returned object format
+ *
+ * Fulfilled:
+ * { status: "fulfilled", value: ... }
+ *
+ * Rejected:
+ * { status: "rejected", reason: ... }
+ *
+ * Approach
+ * 1. Convert the iterable into an array so we know its length.
+ * 2. Wrap every input with Promise.resolve() to support plain values.
+ * 3. Store either the fulfillment value or rejection reason
+ *    at the original index.
+ * 4. Count how many promises have settled.
+ * 5. Resolve once every promise has settled.
+ *
+ * Time Complexity: O(n)
+ * Space Complexity: O(n)
+ */
+
 function promiseAllSettled(promises) {
+  // Stores the outcome of every promise.
+  // Results are stored using the original input index so
+  // the final array matches the input order.
   const results = [];
+
+  // Tracks how many promises have finished
+  // (either fulfilled OR rejected).
   let completed = 0;
+
+  // Promise.allSettled() accepts any iterable.
+  // Convert it into an array so we know its length
+  // and can preserve input order.
   const promiseArray = Array.from(promises);
 
+  // Edge case:
+  // Promise.allSettled([]) immediately resolves
+  // with an empty array.
   if (promiseArray.length === 0) {
     return Promise.resolve([]);
   }
 
   return new Promise((resolve) => {
     promiseArray.forEach((promise, index) => {
+      // Convert plain values into resolved promises.
+      //
+      // Example:
+      // Promise.resolve(10)
+      // behaves like a fulfilled promise with value 10.
       Promise.resolve(promise)
         .then((value) => {
-          results[index] = { status: "fulfilled", value };
+          // Store successful result.
+          results[index] = {
+            status: "fulfilled",
+            value,
+          };
         })
         .catch((reason) => {
-          results[index] = { status: "rejected", reason };
+          // Store failed result.
+          // Unlike Promise.all(), we DO NOT reject immediately.
+          results[index] = {
+            status: "rejected",
+            reason,
+          };
         })
         .finally(() => {
+          // finally() runs regardless of whether the promise
+          // fulfilled or rejected, making it ideal for counting
+          // Because both .then() and .catch() represent a settled promise, and we need to count both cases.
           completed++;
+
+          // Resolve only after EVERY promise has settled.
           if (completed === promiseArray.length) {
             resolve(results);
           }
