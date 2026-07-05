@@ -1776,197 +1776,339 @@ console.log(sample.slice(3, 1)); // [] → invalid range returns empty array
 // 31. Polyfill: Custom Promise
 // ---------------------------------------------
 
-/**
- * Promise States
- * A promise can be in ONLY one of these states
+/**  * Promise States
+ * A promise can only be in one of these three states.
+ * Once it moves from PENDING → FULFILLED or PENDING → REJECTED,
+ * it can NEVER change again (immutable settlement).
  */
 const states = {
-  PENDING: "PENDING", // initial state
-  FULFILLED: "FULFILLED", // resolved successfully
-  REJECTED: "REJECTED", // rejected with error
+  PENDING: "PENDING", // Initial state — not yet resolved or rejected
+  FULFILLED: "FULFILLED", // Resolved successfully with a value
+  REJECTED: "REJECTED", // Rejected with a reason/error
 };
 
 class CustomPromise {
   constructor(executor) {
-    /**
-     * Initial state of promise
-     * Example:
-     * const p = new CustomPromise(...)
-     * → p.state === PENDING
-     */
+    // Every promise starts as PENDING
     this.state = states.PENDING;
 
-    /**
-     * Stores resolved value OR rejected reason
-     * Example:
-     * resolve(100) → value = 100
-     * reject("error") → value = "error"
-     */
+    // Will hold the resolved value or rejection reason
     this.value = undefined;
 
-    /**
-     * Queue to store all `.then()` handlers
-     * Example:
-     * promise.then(fn1)
-     * promise.then(fn2)
-     * → handlers = [fn1, fn2]
-     */
+    // Queue of handler objects: { onSuccess, onFailure }
+    // Why a queue? Because multiple .then() can be attached to the same promise:
+    //   promise.then(fn1)
+    //   promise.then(fn2)
+    // Both must execute when the promise settles.
     this.handlers = [];
 
-    /**
-     * Executor is executed IMMEDIATELY
-     * resolve & reject are passed to user
-     *
-     * Example:
-     * new CustomPromise((resolve, reject) => {
-     *   resolve(10);
-     * })
-     */
     try {
-      // When you write:
-      // new CustomPromise((resolve, reject) => {
-      //   resolve(100);
-      // });
-
-      // This part 👇
-      // (resolve, reject) => {
-      //   resolve(100);
-      // }
-      // 👉 IS the executor
-
-      // “Call the function the user gave me, and give them my resolve and reject methods.”
-      // Pass our resolve/reject functions to the executor.
-      // They are arrow functions, so `this` stays bound to this promise instance.
+      // The executor runs IMMEDIATELY (synchronously).
+      // We pass our internal _resolve and _reject so the user can settle the promise.
+      //
+      // Example:
+      //   new CustomPromise((resolve, reject) => {
+      //     resolve(100);  ← calls this._resolve(100)
+      //   })
+      //
+      // Arrow functions used for _resolve/_reject so `this` is always correct,
+      // even when the user calls resolve() without a class context.
       executor(this._resolve, this._reject);
     } catch (error) {
-      /**
-       * If executor throws synchronously
-       * promise should be rejected
-       *
-       * Example:
-       * new Promise(() => {
-       *   throw new Error("Boom");
-       * })
-       */
+      // If the executor throws synchronously, the promise should reject.
+      // Example:
+      //   new CustomPromise(() => { throw new Error("Boom"); })
+      //   → equivalent to reject(new Error("Boom"))
       this._reject(error);
     }
   }
 
+  // ========================
+  // STATIC METHODS
+  // ========================
+
   /**
-   * Adds a `.then()` handler to queue
-   * If promise already resolved → execute immediately
+   * CustomPromise.resolve(value)
+   *
+   * Wraps a value in a resolved promise.
+   * If the value is already a CustomPromise, return it as-is (no double wrapping).
+   *
+   * Why needed?
+   * - Used in finally() to handle async callbacks
+   * - Used in all/race/any to normalize plain values into promises
+   *
+   * Example:
+   *   CustomPromise.resolve(42).then(v => console.log(v)); // 42
+   *   CustomPromise.resolve(existingPromise) === existingPromise; // true
    */
+  static resolve(value) {
+    if (value instanceof CustomPromise) return value;
+    return new CustomPromise((resolve) => resolve(value));
+  }
 
-  //   Case 1: .then() called BEFORE resolve
-  //  const p = new CustomPromise((resolve) => {
-  //   setTimeout(() => resolve(5), 1000);
-  // });
+  /**
+   * CustomPromise.reject(reason)
+   *
+   * Creates a promise that is immediately rejected with the given reason.
+   *
+   * Example:
+   *   CustomPromise.reject("fail").catch(e => console.log(e)); // "fail"
+   */
+  static reject(reason) {
+    return new CustomPromise((_, reject) => reject(reason));
+  }
 
-  // p.then(v => console.log(v));
+  /**
+   * CustomPromise.all(promises)
+   *
+   * Resolves when ALL promises resolve. Rejects on the FIRST rejection.
+   * Results are in the same order as input (not execution order).
+   *
+   * Why CustomPromise.resolve(promise)?
+   * - Normalizes plain values: all([1, 2, 3]) should work
+   * - Ensures .then() is available on each item
+   *
+   * Example:
+   *   CustomPromise.all([
+   *     CustomPromise.resolve(1),
+   *     CustomPromise.resolve(2)
+   *   ]).then(console.log); // [1, 2]
+   */
+  static all(promises) {
+    return new CustomPromise((resolve, reject) => {
+      const results = [];
+      let completed = 0;
 
-  // Promise is PENDING
-  // Handler is stored
-  // Later, when resolved → execute handlers
+      // Edge case: empty array resolves immediately with []
+      if (promises.length === 0) {
+        return resolve([]);
+      }
 
-  // Case 2: .then() called AFTER resolve
-  // const p = new CustomPromise((resolve) => {
-  //   resolve(5);
-  // });
+      promises.forEach((promise, index) => {
+        CustomPromise.resolve(promise).then((value) => {
+          // Use index (not push) to maintain input order
+          results[index] = value;
+          completed++;
+          // Only resolve when ALL are done
+          if (completed === promises.length) {
+            resolve(results);
+          }
+        }, reject); // Pass reject directly — first failure rejects the whole thing
+      });
+    });
+  }
 
-  // setTimeout(() => {
-  //   p.then(v => console.log(v));
-  // }, 2000);
+  /**
+   * CustomPromise.allSettled(promises)
+   *
+   * Waits for ALL promises to settle (resolve OR reject).
+   * Never rejects — always resolves with an array of result objects.
+   *
+   * Each result: { status: "fulfilled", value } or { status: "rejected", reason }
+   *
+   * Why use this over .all()?
+   * - When you want results of ALL promises regardless of failures
+   *
+   * Example:
+   *   CustomPromise.allSettled([
+   *     CustomPromise.resolve(1),
+   *     CustomPromise.reject("err")
+   *   ]).then(console.log);
+   *   // [{ status: "fulfilled", value: 1 }, { status: "rejected", reason: "err" }]
+   */
+  static allSettled(promises) {
+    return new CustomPromise((resolve) => {
+      const results = [];
+      let completed = 0;
 
-  // Promise already FULFILLED
-  // Handler should execute immediately
-  // 👉 _executeHandlers handles both cases
+      if (promises.length === 0) {
+        return resolve([]);
+      }
 
+      promises.forEach((promise, index) => {
+        CustomPromise.resolve(promise).then(
+          (value) => {
+            results[index] = { status: "fulfilled", value };
+            completed++;
+            if (completed === promises.length) resolve(results);
+          },
+          (reason) => {
+            results[index] = { status: "rejected", reason };
+            completed++;
+            if (completed === promises.length) resolve(results);
+          },
+        );
+      });
+    });
+  }
+
+  /**
+   * CustomPromise.race(promises)
+   *
+   * Resolves or rejects with the FIRST promise to settle.
+   * All others are ignored (but still execute — just their results are discarded).
+   *
+   * Why this works:
+   * - Once resolve/reject is called once, subsequent calls are ignored
+   *   (due to the PENDING check in _handleUpdate)
+   *
+   * Example:
+   *   CustomPromise.race([
+   *     new CustomPromise(res => setTimeout(() => res("slow"), 1000)),
+   *     new CustomPromise(res => setTimeout(() => res("fast"), 100))
+   *   ]).then(console.log); // "fast"
+   */
+  static race(promises) {
+    return new CustomPromise((resolve, reject) => {
+      promises.forEach((promise) => {
+        // Each promise tries to settle the race — first one wins
+        CustomPromise.resolve(promise).then(resolve, reject);
+      });
+    });
+  }
+
+  /**
+   * CustomPromise.any(promises)
+   *
+   * Resolves with the FIRST fulfilled promise.
+   * Only rejects if ALL promises reject (with AggregateError).
+   *
+   * Opposite of .all():
+   * - .all() needs ALL to succeed, fails on first failure
+   * - .any() needs ONE to succeed, fails only if all fail
+   *
+   * Example:
+   *   CustomPromise.any([
+   *     CustomPromise.reject("err1"),
+   *     CustomPromise.resolve("success"),
+   *   ]).then(console.log); // "success"
+   */
+  static any(promises) {
+    return new CustomPromise((resolve, reject) => {
+      const errors = [];
+      let rejectedCount = 0;
+
+      if (promises.length === 0) {
+        return reject(new AggregateError([], "All promises were rejected"));
+      }
+
+      promises.forEach((promise, index) => {
+        CustomPromise.resolve(promise).then(resolve, (reason) => {
+          // Collect errors in order
+          errors[index] = reason;
+          rejectedCount++;
+          // Only reject when ALL have failed
+          if (rejectedCount === promises.length) {
+            reject(new AggregateError(errors, "All promises were rejected"));
+          }
+        });
+      });
+    });
+  }
+
+  // ========================
+  // INSTANCE METHODS
+  // ========================
+
+  /**
+   * Adds a handler object to the queue and attempts execution.
+   *
+   * Two scenarios:
+   * 1. Promise is PENDING → handler is stored, waits for settlement
+   * 2. Promise is already SETTLED → handler executes immediately via _executeHandlers
+   *
+   * This dual behavior is why we always call _executeHandlers after pushing.
+   */
   _addHandler = (handler) => {
     this.handlers.push(handler);
     this._executeHandlers();
   };
 
   /**
-   * resolve(value) wrapper
-   * Example:
-   * resolve(100)
+   * Internal resolve — settles promise as FULFILLED with given value.
+   *
+   * Arrow function so `this` is bound to the instance.
+   * Without arrow: when user calls resolve(100), `this` would be undefined.
    */
   _resolve = (value) => {
     this._handleUpdate(states.FULFILLED, value);
   };
 
   /**
-   * reject(reason) wrapper
-   * Example:
-   * reject("Something went wrong")
+   * Internal reject — settles promise as REJECTED with given reason.
    */
   _reject = (reason) => {
     this._handleUpdate(states.REJECTED, reason);
   };
 
   /**
-   * Core state update logic
+   * Core state transition logic.
+   *
+   * Key design decisions:
+   *
+   * 1. DOUBLE GUARD against settling more than once:
+   *    - First check BEFORE setTimeout: fast exit, avoids unnecessary timer
+   *    - Second check INSIDE setTimeout: prevents race condition when both
+   *      resolve() and reject() are called synchronously before either timer fires
+   *
+   *    Example of the race condition:
+   *      new CustomPromise((resolve, reject) => {
+   *        resolve(1);  // schedules setTimeout
+   *        reject(2);   // also schedules setTimeout (first guard passes because state is still PENDING)
+   *      });
+   *    Without the second guard, both would execute and state would be set twice.
+   *
+   * 2. setTimeout simulates ASYNC behavior:
+   *    - Native promises use microtasks (queueMicrotask / MutationObserver)
+   *    - setTimeout is a macrotask — close enough for a polyfill
+   *    - Ensures .then() handlers always run asynchronously, even if promise
+   *      is already resolved when .then() is called
+   *
+   * 3. Promise UNWRAPPING (flattening):
+   *    - If you resolve a promise with another promise, the outer promise
+   *      should adopt the inner promise's eventual state
+   *    - Example:
+   *        const inner = new CustomPromise(res => setTimeout(() => res(10), 1000));
+   *        const outer = new CustomPromise(res => res(inner));
+   *        outer.then(console.log); // 10 (after 1 second, NOT the inner promise object)
    */
   _handleUpdate = (state, value) => {
-    /**
-     * A promise can be settled ONLY ONCE
-     *
-     * Example:
-     * resolve(1)
-     * resolve(2) ❌ ignored
-     */
+    // First guard: quick exit if already settled
     if (this.state !== states.PENDING) return;
 
-    /**
-     * Async behavior
-     * Native Promises use microtasks
-     * Here we simulate async using setTimeout
-     */
     setTimeout(() => {
-      // check again
+      // Second guard: handles the race condition (see explanation above)
       if (this.state !== states.PENDING) return;
-      /**
-       * Promise unwrapping (flattening)
-       *
-       * Example:
-       * const inner = new CustomPromise(res => res(10));
-       * const outer = new CustomPromise(res => res(inner));
-       *
-       * outer should resolve AFTER inner resolves
-       */
+
+      // If resolving with a promise, wait for it to settle first
+      // then adopt its state by calling our own resolve/reject
       if (value instanceof CustomPromise) {
         return value.then(this._resolve, this._reject);
       }
 
-      /**
-       * Lock the state and store value
-       */
+      // Lock the state and store the value — this is irreversible
       this.state = state;
       this.value = value;
 
-      /**
-       * Execute all queued `.then()` handlers
-       */
+      // Now execute any .then() handlers that were queued while PENDING
       this._executeHandlers();
     }, 0);
   };
 
   /**
-   * Executes stored handlers once promise is settled
+   * Runs all queued handlers IF the promise is settled.
+   *
+   * Why check state first?
+   * - _addHandler calls this immediately. If still PENDING, we do nothing
+   *   and wait for _handleUpdate to call us later.
+   *
+   * Why clear handlers after execution?
+   * - Prevents memory leaks (handlers hold references to closures)
+   * - Prevents double execution if _executeHandlers is called again
    */
   _executeHandlers = () => {
-    /**
-     * If still pending → wait
-     */
     if (this.state === states.PENDING) return;
 
-    /**
-     * Run all handlers
-     *
-     * Example:
-     * promise.then(v => console.log(v))
-     * promise.then(v => console.log(v * 2))
-     */
     this.handlers.forEach((handler) => {
       if (this.state === states.FULFILLED) {
         handler.onSuccess(this.value);
@@ -1975,69 +2117,66 @@ class CustomPromise {
       }
     });
 
-    /**
-     * Clear handlers to avoid memory leaks
-     */
+    // Clear after execution to avoid memory leaks and double-runs
     this.handlers = [];
   };
 
   /**
-   * then() always returns a NEW promise
+   * .then(onSuccess, onFailure)
+   *
+   * ALWAYS returns a NEW promise (this is what enables chaining).
+   *
+   * The new promise resolves/rejects based on what the handler returns:
+   * - Handler returns a value → next promise resolves with that value
+   * - Handler throws → next promise rejects with that error
+   * - Handler returns a promise → next promise adopts that promise's state
+   *   (handled by _handleUpdate's unwrapping logic)
+   *
+   * If no handler is provided:
+   * - Missing onSuccess → value passes through (transparent)
+   * - Missing onFailure → error propagates forward (until caught)
+   *
+   * Example chain:
+   *   promise
+   *     .then(v => v + 1)      // returns new promise that resolves with v+1
+   *     .then(v => v * 2)      // returns new promise that resolves with (v+1)*2
+   *     .catch(err => fallback) // only runs if something above rejected
    */
   then = (onSuccess, onFailure) => {
-    /**
-     * Example:
-     * promise
-     *   .then(v => v + 1)
-     *   .then(v => console.log(v))
-     */
     return new CustomPromise((resolve, reject) => {
       this._addHandler({
         onSuccess: (value) => {
-          /**
-           * If no success handler
-           * pass value to next promise
-           */
+          // No success handler? Pass value through to the next .then() in chain.
+          // This is why: promise.then().then(v => ...) still works.
           if (!onSuccess) {
             return resolve(value);
           }
-
           try {
-            /**
-             * Resolve next promise with returned value
-             *
-             * Example:
-             * then(v => v * 2)
-             */
             const result = onSuccess(value);
+            // If result is a CustomPromise, _handleUpdate will unwrap it
             resolve(result);
           } catch (error) {
-            /**
-             * If handler throws → reject next promise
-             */
+            // If the handler throws, reject the next promise in the chain
             reject(error);
           }
         },
 
         onFailure: (reason) => {
-          /**
-           * If no failure handler
-           * propagate error forward
-           */
+          // No failure handler? Propagate error to next promise in chain.
+          // This is how errors "skip" .then() and reach .catch():
+          //   reject("err").then(v => ...).then(v => ...).catch(handler)
+          //   The error skips both .then() because they have no onFailure
           if (!onFailure) {
             return reject(reason);
           }
-
           try {
-            /**
-             * Error handler can RECOVER
-             *
-             * Example:
-             * .catch(err => 10)
-             */
             const result = onFailure(reason);
+            // IMPORTANT: A catch handler that returns a value RECOVERS the chain.
+            // The next promise RESOLVES (not rejects) with the returned value.
+            //   .catch(err => "default") → next .then() gets "default"
             resolve(result);
           } catch (error) {
+            // If catch handler itself throws, propagate the new error
             reject(error);
           }
         },
@@ -2046,59 +2185,54 @@ class CustomPromise {
   };
 
   /**
-   * catch is just syntactic sugar over then
+   * .catch(onFailure)
+   *
+   * Syntactic sugar for .then(null, onFailure)
+   * Only handles rejections. Success values pass through.
+   *
+   * Example:
+   *   promise.catch(err => console.log(err))
+   *   // is identical to:
+   *   promise.then(null, err => console.log(err))
    */
   catch = (onFailure) => {
     return this.then(null, onFailure);
   };
 
   /**
-   * finally(callback)
+   * .finally(callback)
    *
-   * Runs regardless of whether the promise is fulfilled or rejected.
+   * Runs callback regardless of resolve/reject, then PRESERVES the original
+   * value/error for the next handler in the chain.
    *
-   * Native behavior:
-   * - Does NOT receive the promise's value or error.
-   * - Waits if the callback returns a promise.
-   * - Preserves the original fulfillment value or rejection reason.
+   * Key behaviors (matching native Promise.finally):
+   * 1. callback receives NO arguments (it doesn't know if resolved or rejected)
+   * 2. The returned promise adopts the ORIGINAL value/error (not callback's return)
+   * 3. If callback returns a promise, .finally() WAITS for it before continuing
+   * 4. If callback throws or returns a rejected promise, that error OVERRIDES
+   *
+   * Implementation:
+   * - Use .then() with both handlers to intercept settlement
+   * - Wrap callback() in CustomPromise.resolve() to handle async callbacks
+   * - After callback completes, return original value or re-throw original error
    *
    * Example:
-   * Promise.resolve(10)
-   *   .finally(() => console.log("Cleanup"))
-   *   .then(console.log); // 10
+   *   CustomPromise.resolve(100)
+   *     .finally(() => console.log("cleanup"))  // runs cleanup
+   *     .then(val => console.log(val));          // 100 (original value preserved)
    *
-   * Promise.reject("Error")
-   *   .finally(() => console.log("Cleanup"))
-   *   .catch(console.error); // Error
+   *   CustomPromise.resolve(100)
+   *     .finally(() => asyncCleanup())           // waits for cleanup to finish
+   *     .then(val => console.log(val));          // 100 (still preserved)
    */
   finally = (callback) => {
     return this.then(
       (value) => {
-        /**
-       * Run the cleanup callback after successful completion.
-       *
-       * callback() may return:
-       * - nothing
-       * - a value
-       * - another CustomPromise
-       *
-       * Wrapping it with CustomPromise.resolve() ensures we wait
-       * for asynchronous cleanup before continuing.
-       * 
-       * Run the cleanup.
-        If it returns a promise, wait for it.
-        Once cleanup finishes, continue with the original value.
-       */
+        // Run callback, wait for it if async, then return ORIGINAL value
         return CustomPromise.resolve(callback()).then(() => value);
       },
-
       (reason) => {
-        /**
-         * Run the same cleanup callback after failure.
-         *
-         * After cleanup finishes, rethrow the original error so the
-         * rejection continues down the promise chain.
-         */
+        // Run callback, wait for it if async, then re-throw ORIGINAL error
         return CustomPromise.resolve(callback()).then(() => {
           throw reason;
         });
@@ -2107,9 +2241,10 @@ class CustomPromise {
   };
 }
 
-/**
- * USAGE EXAMPLE
- */
+// ========================
+// USAGE EXAMPLES
+// ========================
+
 const promise = new CustomPromise((resolve, reject) => {
   resolve(100);
 });
@@ -2118,8 +2253,29 @@ promise
   .then((val) => val + 50)
   .then((val) => console.log(val)) // 150
   .catch((err) => console.error(err))
-  .finally(() => console.log("Done"))
-  .then(() => console.log("Promise Implemented successfully"));
+  .finally(() => console.log("Done"));
+
+// Test: finally preserves resolved value
+CustomPromise.resolve(42)
+  .finally(() => console.log("cleanup"))
+  .then((val) => console.log("After finally:", val)); // 42
+
+// Test: finally preserves rejection
+CustomPromise.reject("oops")
+  .finally(() => console.log("cleanup on error"))
+  .catch((err) => console.log("Caught:", err)); // "oops"
+
+// Test: finally waits for async callback
+CustomPromise.resolve(10)
+  .finally(() => new CustomPromise((res) => setTimeout(() => res(), 500)))
+  .then((val) => console.log("After async finally:", val)); // 10
+
+// Test: double resolve (second is ignored)
+const p = new CustomPromise((resolve) => {
+  resolve(1);
+  resolve(2); // ignored — promise already settled
+});
+p.then((val) => console.log("Double resolve:", val)); // 1
 
 // ---------------------------------------------
 // 32. Polyfill: Promise.Race
