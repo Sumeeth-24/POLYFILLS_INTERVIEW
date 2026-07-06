@@ -1508,6 +1508,14 @@ setTimeout(() => {
 // -------------------------------------------
 // 27 & 28 Polyfill for setTimeout & setInterval
 // - Uses requestIdleCallback for async scheduling
+/**
+ * Is setTimeout() guaranteed to execute after the specified delay?
+ * Answer is "NO" because the time passed to setTimeout() is the minimum delay, not the exact execution time.
+ * Once the timer expires, the callback is added to the task queue. It will only execute when:
+ *  - The call stack is empty.
+ * - All pending microtasks have finished.
+ * - The event loop picks up the callback.
+ */
 // -------------------------------------------
 
 // Use Symbol keys to safely store internal state on `window`
@@ -2901,11 +2909,19 @@ function useCustomEffect(effect, deps) {
     // If previous deps do NOT exist, this is the first render
     const firstRun = !prevDepsRef.current;
 
-    // Determine if dependency array changed (React uses shallow comparison)
+    // -----------------------------
+    // NEW:
+    // React compares dependencies using Object.is()
+    // instead of !==.
+    //
+    // This correctly handles edge cases like:
+    // - NaN (Object.is(NaN, NaN) === true)
+    // - -0 and +0
+    // -----------------------------
     const depsChanged =
       noDepsProvided ||
       firstRun ||
-      deps.some((dep, i) => dep !== prevDepsRef.current[i]);
+      deps.some((dep, i) => !Object.is(dep, prevDepsRef.current[i]));
 
     // -----------------------------
     // Step 2: If dependencies changed,
@@ -2920,10 +2936,13 @@ function useCustomEffect(effect, deps) {
       // Run the actual effect
       const cleanup = effect();
 
-      // If effect returns a cleanup function, save it
-      if (typeof cleanup === "function") {
-        cleanupRef.current = cleanup;
-      }
+      // -----------------------------
+      // NEW:
+      // If effect returns a cleanup function, save it.
+      // Otherwise clear any previous cleanup so an old
+      // cleanup isn't accidentally called later.
+      // -----------------------------
+      cleanupRef.current = typeof cleanup === "function" ? cleanup : undefined;
 
       // Save deps for next render
       prevDepsRef.current = deps;
@@ -2939,6 +2958,12 @@ function useCustomEffect(effect, deps) {
     };
 
     // React will call this entire useEffect when any dependency changes
+    //
+    // NOTE:
+    // We intentionally pass `deps` here so React schedules
+    // this effect exactly like a normal useEffect.
+    // The custom dependency comparison above determines
+    // whether our custom effect actually executes.
   }, deps);
 }
 
@@ -2958,177 +2983,92 @@ export default useCustomEffect;
 
 // If you bypass React’s scheduling, the entire lifecycle breaks.
 
+/* EXAMPLE */
+const [count, setCount] = useState(0);
+
+useCustomEffect(() => {
+  console.log("count changed", count);
+}, [count]);
+
+return <button onClick={() => setCount((c) => c + 1)}>{count}</button>;
+
+
 // ---------------------------------------------
 //  40. UseState
 // ---------------------------------------------
-let globalState = []; // Stores all state values for the component
-let stateCursor = 0; // Tracks which state index is currently being used
+let hookStates = [];
+let hookIndex = 0;
 
-export function useCustomState(initialValue) {
-  // ------------------------------
-  // WHY global array + cursor?
-  // ------------------------------
-  // React stores hook state *in the order they are called*.
-  // Example:
-  //   useState()  -> state[0]
-  //   useState()  -> state[1]
-  //   useEffect() -> hook[2]
+function useCustomUseState(initialValue) {
+  // -----------------------------
+  // WHY do hooks need an index?
+  // -----------------------------
+  // React identifies each hook by the
+  // order in which it is called.
   //
-  // The same order must repeat every render.
+  // First useState -> slot 0
+  // Second useState -> slot 1
+  // Third useState -> slot 2
   //
-  // That's why React uses a "hook cursor" internally.
-  // ------------------------------
+  // This is why hooks must always be
+  // called in the same order.
+  // -----------------------------
 
-  const currentCursor = stateCursor; // bind this hook’s index
-  // If there's no value already, it's the first render → initialize state
-  if (globalState[currentCursor] === undefined) {
-    globalState[currentCursor] = initialValue;
+  // -----------------------------
+  // WHY is the initial value used
+  // only on the first render?
+  // -----------------------------
+  // React creates the state once.
+  // Future renders reuse the stored
+  // value instead of the initial one.
+  // -----------------------------
+  if (hookStates[hookIndex] === undefined) {
+    hookStates[hookIndex] =
+      typeof initialValue === "function" ? initialValue() : initialValue;
   }
 
-  // The actual value for this useState call
-  const value = globalState[currentCursor];
+  const currentIndex = hookIndex;
 
-  // ------------------------------
-  // Why setter uses a function?
-  // ------------------------------
-  // Because React must update the value AND trigger a re-render.
-  // We simulate this by updating globalState[] and forcing a re-render manually.
-  // ------------------------------
-  const setValue = (newValue) => {
-    // Functional update support
-    if (typeof newValue === "function") {
-      globalState[currentCursor] = newValue(globalState[currentCursor]);
-    } else {
-      globalState[currentCursor] = newValue;
-    }
+  // -----------------------------
+  // WHY support functional updates?
+  // -----------------------------
+  // React allows:
+  //
+  // setState(value)
+  // OR
+  // setState(prev => newValue)
+  //
+  // The functional form always
+  // receives the latest state.
+  // -----------------------------
+  function setState(value) {
+    hookStates[currentIndex] =
+      typeof value === "function" ? value(hookStates[currentIndex]) : value;
 
-    // In React, state updates schedule a re-render.
-    // Here we simulate "re-render" by calling the component manually.
-    rerender();
-  };
-
-  // Move cursor for the next hook
-  stateCursor++;
-
-  return [value, setValue];
-}
-
-// FOR DEMO
-
-function rerender() {
-  stateCursor = 0; // reset cursor for next render
-  App(); // call component again → re-render
-}
-
-function App() {
-  const [count, setCount] = useCustomState(0);
-  const [name, setName] = useCustomState("John");
-  const [toggle, setToggle] = useCustomState(false);
-
-  console.log("RENDER →", { count, name, toggle });
-
-  // Simulate a button click
-  setTimeout(() => setCount((c) => c + 1), 1000);
-  setTimeout(() => setName("Alice"), 1500);
-  setTimeout(() => setToggle((t) => !t), 2000);
-}
-
-App(); // first render
-
-// RENDER → { count: 0, name: "John", toggle: false }
-// RENDER → { count: 1, name: "John", toggle: false }
-// RENDER → { count: 1, name: "Alice", toggle: false }
-// RENDER → { count: 1, name: "Alice", toggle: true }
-
-// 1. Why global array?
-// Because React stores hook state outside the function, not inside.
-
-// 2. Why cursor?
-// Because hooks rely on call order, not variable names.
-
-// 3. Why state persists?
-// Because stored in globalState, which does not reset between renders.
-
-// 4. Why setter triggers re-render?
-// Because new UI depends on new state → React must re-run component.
-
-// 5. Why support setState(prev => ...)?
-// Because React supports functional updates to avoid stale closures.
-
-// ---------------------------------------------
-//  41. UseReducer
-// ---------------------------------------------
-let globalState = []; // Stores all hook states
-let stateCursor = 0; // Tracks which hook index is currently being read
-
-export function useCustomReducer(reducer, initialState) {
-  const cursor = stateCursor;
-
-  // ----------------------------------------
-  // Initialize state on first render
-  // ----------------------------------------
-  if (globalState[cursor] === undefined) {
-    globalState[cursor] = initialState;
+    // -----------------------------
+    // WHY trigger a re-render?
+    // -----------------------------
+    // Changing state alone isn't enough.
+    // React must render the component
+    // again so the UI reflects the
+    // latest state.
+    // -----------------------------
+    render();
   }
 
-  const dispatch = (action) => {
-    // reducer(currentState, action) → nextState
-    globalState[cursor] = reducer(globalState[cursor], action);
+  const state = hookStates[currentIndex];
 
-    // Simulate React re-render
-    rerender();
-  };
+  hookIndex++;
 
-  // Move cursor to next hook
-  stateCursor++;
-
-  return [globalState[cursor], dispatch];
+  return [state, setState];
 }
 
-// useReducer is basically useState + reducer
-// state + dispatch
-// where dispatch = setState(reducer(current, action))
+export default useCustomUseState;
 
-function rerender() {
-  stateCursor = 0; // reset hook index before re-render
-  App(); // call component again
-}
 
-import { useCustomReducer } from "./useCustomReducer";
-
-function counterReducer(state, action) {
-  switch (action.type) {
-    case "inc":
-      return state + 1;
-    case "dec":
-      return state - 1;
-    default:
-      return state;
-  }
-}
-
-function toggleReducer(state, action) {
-  return action === "TOGGLE" ? !state : state;
-}
-
-function App() {
-  const [count, dispatchCount] = useCustomReducer(counterReducer, 0);
-  const [toggle, dispatchToggle] = useCustomReducer(toggleReducer, false);
-
-  console.log("RENDER →", { count, toggle });
-
-  setTimeout(() => dispatchCount({ type: "inc" }), 1000);
-  setTimeout(() => dispatchToggle("TOGGLE"), 1500);
-}
-
-App();
-
-// RENDER → { count: 0, toggle: false }
-// RENDER → { count: 1, toggle: false }
-// RENDER → { count: 1, toggle: true }
 
 // ---------------------------------------------
-//  42. What is a Debug Logger Middleware?
+//  41. What is a Debug Logger Middleware?
 
 // "Normally, dispatch directly sends an action to the reducer. But sometimes we want to log actions, authenticate users, make API calls, or measure execution time without changing the reducer. Middleware sits between dispatch and the reducer to intercept every action."
 // ---------------------------------------------
