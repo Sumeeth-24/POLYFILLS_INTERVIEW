@@ -4,7 +4,7 @@
  * MAP, FILTER, AND REDUCE ARE ARRAY METHODS USED TO ITERATE OVER AN ARRAY AND PERFORM TRANSFORMATIONS OR COMPUTATIONS.
  * - MAP: Map method is used for creating a new array from existing one by applying a function to each one of the elements of the first array.
  * - FILTER: Filters takes each element in an array and it applies a conditional statement against it. If the conditional returns true the elements get pushed into the output array else if it is false then the element does not get pushed into the output array. Basically it filters element which fulfill the provided criteria.
- * - REDUCE: Reduces method reduces an array of values down to just one value. Accumulator is the result of the previous computation value. If there is no initial value, it takes first element of array as value for accumulator.
+ * - REDUCE: Reduce method reduces an array of values down to just one value. Accumulator is the result of the previous computation value. If there is no initial value, it takes first element of array as value for accumulator.
  */
 
 // Sample input array
@@ -69,10 +69,10 @@ console.log("Map:", mapResult, myMapResult);
 /**
  * Array.prototype.myFilter
  * - Creates a new array with all elements that pass the test implemented by the provided function.
- * * - This line adds a new function called myMap to the prototype of the Array object.
+ * * - This line adds a new function called myFilter to the prototype of the Array object.
  * - By doing this, all arrays will have access to this myFilter method.
- * - cb is a parameter representing a callback function that you pass when calling myMap on an array.
- * - this refer to the array on which myMap was called. For example, if you did nums.myFilter(...), this would be nums.
+ * - cb is a parameter representing a callback function that you pass when calling myFilter on an array.
+ * - this refer to the array on which myFilter was called. For example, if you did nums.myFilter(...), this would be nums.
  */
 Array.prototype.myFilter = function (cb) {
   // 1. Throw TypeError if 'this' is null or undefined
@@ -474,7 +474,7 @@ console.log(count); // 1 (only incremented once)
 
 // CALL VS APPLY VS BIND
 
-/* call, apply, and bind are methods that let you decide what this should refer to inside a function.
+/* call, apply, and bind are methods that let you decide what "this" should refer to inside a function.
 Think of them as borrowing a function and telling it who should be "this"
 call() → Sets this and invokes the function immediately. Arguments are passed individually.
 apply() → Sets this and invokes the function immediately. Arguments are passed as an array.
@@ -3119,7 +3119,14 @@ const loggerMiddleware = (store) => (next) => (action) => {
 
   console.log("Action:", action);
 
-  const result = next(action); // Instead of directly calling the reducer, middleware forwards the action using next(). This allows middleware to execute code before and after the reducer.
+ // next is the function that passes the action to whatever comes after the current middleware.
+ // Depending on where you are in the middleware chain:
+ // it might call the next middleware
+ // or, if you're the last middleware, it finally calls the Redux reducer.
+ // You don't have to know what it points to—Redux wires that up for you.
+ // This allows middleware to execute code before and after the reducer.
+ // I'm done with my work. Pass this action to the next middleware (or reducer) and then Execution comes back to your middleware.
+  const result = next(action); 
 
   console.log("Next State:", store.getState());
 
